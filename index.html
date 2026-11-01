@@ -18,7 +18,7 @@ html,body{margin:0;padding:0;height:100%;}
   --text:#1c1c1e;--text-secondary:#6e6e73;--text-tertiary:#aeaeb2;
   --sep:rgba(60,60,67,.12);--blue:#007aff;
   --bubble-me:#007aff;--bubble-me-text:#fff;
-  --bubble-other:rgba(118,118,128,.16);--bubble-other-text:#1c1c1e;
+  --bubble-other:rgba(118,118,128,.16);--bubble-other-text:#1c1c1e;--bubble-other-solid:#ffffff;
   --danger:#ff3b30;--fill-1:rgba(120,120,128,.12);--fill-2:rgba(120,120,128,.20);
   --radius-l:22px;--radius-m:16px;--radius-s:12px;
   --ease:cubic-bezier(.22,1,.36,1);--shadow:0 8px 32px rgba(0,0,0,.08);
@@ -28,7 +28,7 @@ html,body{margin:0;padding:0;height:100%;}
   --card-bg:rgba(28,28,30,.72);--card-bg-solid:#1c1c1e;
   --text:#f2f2f7;--text-secondary:#98989d;--text-tertiary:#636366;
   --sep:rgba(255,255,255,.12);--blue:#0a84ff;--bubble-me:#0a84ff;
-  --bubble-other:rgba(118,118,128,.30);--bubble-other-text:#f2f2f7;
+  --bubble-other:rgba(118,118,128,.30);--bubble-other-text:#f2f2f7;--bubble-other-solid:#2c2c2e;
   --fill-1:rgba(120,120,128,.20);--fill-2:rgba(120,120,128,.32);
   --shadow:0 8px 32px rgba(0,0,0,.5);
 }
@@ -105,8 +105,8 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;padding:0;
   font-size:16px;line-height:1.38;word-break:break-word;white-space:pre-wrap;
   animation:bubbleIn .34s var(--ease);}
 .bubble.me{background:var(--bubble-me);color:var(--bubble-me-text);border-bottom-right-radius:5px;}
-.bubble.other{background:var(--bubble-other);color:var(--bubble-other-text);
-  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom-left-radius:5px;}
+.bubble.other{background:var(--bubble-other-solid);color:var(--bubble-other-text);
+  border-bottom-left-radius:5px;}
 
 .bubble-quote{white-space:normal;margin-bottom:6px;padding:6px 10px;border-radius:9px;
   font-size:12px;line-height:1.4;border-left:2.5px solid rgba(0,0,0,.15);
@@ -223,7 +223,7 @@ body.no-anim .sticker-msg{animation:none;}
 .invite-accept-btn{background:var(--blue);color:#fff;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;}
 
 #typingRow{display:flex;justify-content:flex-start;padding:4px 0;margin-top:2px;}
-#typingRow .typing-bubble{background:var(--bubble-other);
+#typingRow .typing-bubble{background:var(--bubble-other-solid);
   backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
   border-radius:20px;border-bottom-left-radius:5px;padding:13px 16px;display:flex;gap:5px;align-items:center;
   animation:bubbleIn .3s var(--ease);}
@@ -605,6 +605,13 @@ body.no-anim .sticker-msg{animation:none;}
 .ncm-tabs{display:flex;gap:8px;margin-bottom:10px;}
 .ncm-tab{font-size:13px;padding:6px 12px;border-radius:9px;background:var(--fill-1);color:var(--text-secondary);}
 .ncm-tab.on{background:var(--blue);color:#fff;font-weight:600;}
+.img-msg{max-width:62vw;max-height:280px;border-radius:14px;display:block;object-fit:cover;
+  animation:bubbleIn .34s var(--ease);background:var(--fill-1);cursor:pointer;}
+body.no-anim .img-msg{animation:none;}
+body.nav-clear .nav{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;
+  border-bottom-color:transparent;}
+body.nav-clear .composer{background:transparent;}
+#btnInlineSticker,#btnInlineImage{color:var(--text-secondary);}
 </style>
 </head>
 <body>
@@ -637,9 +644,12 @@ body.no-anim .sticker-msg{animation:none;}
         <button class="qp-close" id="qpClose" title="取消引用"></button>
       </div>
       <div class="composer">
+        <button class="icon-btn tool-btn" id="btnInlineSticker" title="表情"></button>
+        <button class="icon-btn tool-btn" id="btnInlineImage" title="图片"></button>
         <textarea id="msgInput" rows="1" placeholder="iMessage"></textarea>
         <button class="icon-btn tool-btn" id="btnToggleTool" title="工具箱"></button>
         <button class="send-btn" id="btnSend" disabled></button>
+        <input type="file" id="chatImageInput" accept="image/*" style="display:none;">
       </div>
       <div id="toolPanel">
         <div class="tool-grid">
@@ -954,7 +964,8 @@ const DB = {
       autoMoment: false, momentCardsCount: 2, momentMinH: 1, momentMaxH: 3,
       bgKeepAlive: true, silentAudio: false,
       ncmApi: '',
-      chatBg: false, customCss: ''
+      chatBg: false, customCss: '',
+      navClear: false, replyBurst: 1
     };
     const cur = S.get('settings', {});
     return Object.assign({}, defaults, cur && typeof cur === 'object' ? cur : {});
@@ -1033,6 +1044,9 @@ function applyCustomCss(){
 }
 
 let _chatBgUrl = null;
+function applyNavClear(){
+  document.body.classList.toggle('nav-clear', !!DB.settings().navClear);
+}
 async function applyChatBg(){
   const list = $('#chatList');
   if (!list) return;
@@ -1384,6 +1398,12 @@ function msgHTML(m, prevTs){
     html += '<div class="revoke-note">' + esc(m.text || '通话已结束') + '</div>';
     return html;
   }
+  if (m.type === 'image'){
+    html += '<div class="msg-row ' + (m.from === 'me' ? 'me' : 'other') + '">' +
+      '<img class="img-msg" src="' + esc(m.text) + '" data-msg="' + m.id + '" alt="">' +
+    '</div>';
+    return html;
+  }
   if (m.type === 'gift') {
     const g = m.giftData;
     html += '<div class="msg-row ' + (m.from === 'me' ? 'me' : 'other') + '" style="flex-direction:column;align-items:' + (m.from === 'me' ? 'flex-end' : 'flex-start') + ';">' +
@@ -1669,7 +1689,37 @@ function sendMessage(isSticker, stickerUrl){
   scheduleReply(f.id, Math.round(wait * 1000));
 }
 
+// 把图片压缩后作为消息发出，避免占满 localStorage
 // 回复走 BG 调度：页面可见时用本地定时器，切后台则交给 Service Worker，回来再回填
+function sendChatImage(file){
+  if (!file) return;
+  const fr = new FileReader();
+  fr.onerror = () => toast('读取图片失败');
+  fr.onload = () => {
+    const img = new Image();
+    img.onerror = () => toast('这张图片无法解析，请换 JPG/PNG');
+    img.onload = () => {
+      const max = 900;
+      let w = img.naturalWidth || img.width || max;
+      let h = img.naturalHeight || img.height || max;
+      const scale = Math.min(1, max / Math.max(w, h));
+      w = Math.max(1, Math.round(w * scale));
+      h = Math.max(1, Math.round(h * scale));
+      let data;
+      try {
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        data = c.toDataURL('image/jpeg', 0.72);
+      } catch (e) { toast('图片处理失败'); return; }
+      appendMessage({ id: uid(), from: 'me', type: 'image', text: data, ts: Date.now() });
+      scrollToBottom();
+    };
+    img.src = String(fr.result || '');
+  };
+  fr.readAsDataURL(file);
+}
+
 function scheduleReply(friendId, delayMs){
   if (state.replyTaskId) BG.cancel(state.replyTaskId);
   const id = 'bg_reply_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -1757,12 +1807,16 @@ function runAutoReply(friendId){
 
     const activePool = getAllCards();
     if (activePool.length) {
-      const pick = pickWeightedCard(activePool);
-      appendMessage({
-        id: uid(), from: 'other', type: pick.type,
-        text: pick.content, ts: Date.now(),
-        quote: replyQuote
-      });
+      const burst = Math.max(1, Math.min(5, parseInt(DB.settings().replyBurst, 10) || 1));
+      const count = Math.max(1, Math.min(burst, 1 + Math.floor(Math.random() * burst)));
+      for (let i = 0; i < count; i++){
+        const pick = pickWeightedCard(activePool);
+        appendMessage({
+          id: uid(), from: 'other', type: pick.type,
+          text: pick.content, ts: Date.now(),
+          quote: i === 0 ? replyQuote : null
+        });
+      }
     } else {
       // 没有字卡时不发送任何文本
     }
@@ -4637,7 +4691,9 @@ function renderMe(){
         '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button>' +
       '<button class="row" id="rowCustomCss"><span class="r-label">自定义 CSS</span>' +
         '<span class="r-value">' + (st.customCss ? '已启用' : '未设置') + '</span>' +
-        '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button></div>' +
+        '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button>' +
+      '<div class="row" id="rowNavClear"><span class="r-label">顶部栏透明</span>' +
+        '<span class="switch ' + (st.navClear ? 'on' : '') + '"></span></div></div>' +
     '<div class="group-title">聊天与自动化</div>' +
     '<div class="group">' +
       '<div class="row" id="rowAnim"><span class="r-label">消息淡入动画</span>' +
@@ -4648,6 +4704,12 @@ function renderMe(){
           '<input class="num-input" id="setWaitMin" type="number" min="0" step="0.1" value="' + esc(st.waitMin) + '">' +
           '<span style="color:var(--text-tertiary);font-size:13px;">至</span>' +
           '<input class="num-input" id="setWaitMax" type="number" min="0" step="0.1" value="' + esc(st.waitMax) + '">' +
+        '</div></div>' +
+      '<div class="row" style="flex-wrap:wrap;gap:10px;">' +
+        '<span class="r-label" style="flex:1 1 100%;font-size:15px;">对方一次最多连发几条（1-5）</span>' +
+        '<div style="display:flex;align-items:center;gap:8px;width:100%;">' +
+          '<input class="num-input" id="setReplyBurst" type="number" min="1" max="5" value="' + esc(st.replyBurst || 1) + '">' +
+          '<span style="font-size:12px;color:var(--text-secondary);">实际条数在 1 到该值之间随机</span>' +
         '</div></div>' +
       '<div class="row" id="rowAutoLetter"><span class="r-label">对方自动写信</span>' +
         '<span class="switch ' + (st.autoLetter ? 'on' : '') + '"></span></div>' +
@@ -4720,6 +4782,13 @@ function renderMe(){
   $('#rowTheme').addEventListener('click', toggleTheme);
   $('#rowChatBg').addEventListener('click', openChatBgEditor);
   $('#rowCustomCss').addEventListener('click', openCustomCssEditor);
+  $('#rowNavClear').addEventListener('click', () => {
+    const cur = DB.settings();
+    cur.navClear = !cur.navClear;
+    DB.setSettings(cur);
+    $('#rowNavClear').querySelector('.switch').classList.toggle('on', cur.navClear);
+    applyNavClear();
+  });
   $('#rowCards').addEventListener('click', openCardLibrary);
   $('#rowExport').addEventListener('click', exportData);
   $('#rowImport').addEventListener('click', importData);
@@ -4761,6 +4830,7 @@ function renderMe(){
     const mmax = Math.max(mmin, clampH($('#setMomentMaxH').value, mmin));
     cur.letterMinH = lmin; cur.letterMaxH = lmax;
     cur.momentMinH = mmin; cur.momentMaxH = mmax;
+    cur.replyBurst = Math.max(1, Math.min(5, parseInt($('#setReplyBurst').value, 10) || 1));
     DB.setSettings(cur);
     $('#setWaitMin').value = cur.waitMin;
     $('#setWaitMax').value = cur.waitMax;
@@ -4768,6 +4838,7 @@ function renderMe(){
     $('#setMomentCount').value = cur.momentCardsCount;
     $('#setLetterMinH').value = cur.letterMinH; $('#setLetterMaxH').value = cur.letterMaxH;
     $('#setMomentMinH').value = cur.momentMinH; $('#setMomentMaxH').value = cur.momentMaxH;
+    $('#setReplyBurst').value = cur.replyBurst;
   };
   $('#setWaitMin').addEventListener('change', saveSettings);
   $('#setWaitMax').addEventListener('change', saveSettings);
@@ -4777,6 +4848,7 @@ function renderMe(){
   $('#setLetterMaxH').addEventListener('change', saveSettings);
   $('#setMomentMinH').addEventListener('change', saveSettings);
   $('#setMomentMaxH').addEventListener('change', saveSettings);
+  $('#setReplyBurst').addEventListener('change', saveSettings);
 
   $('#rowAnim').addEventListener('click', () => {
     const cur = DB.settings();
@@ -5332,6 +5404,7 @@ const BG = {
   failed: false,
   reg: null,
   local: new Map(),
+  localTasks: new Map(),
   autoIds: { letter: null, moment: null },
   applied: new Set(),
   installPrompt: null,
@@ -5414,12 +5487,15 @@ const BG = {
   },
 
   scheduleLocal(task){
+    this.cancelLocal(task.id);
     const timer = setTimeout(() => {
       this.local.delete(task.id);
+      this.localTasks.delete(task.id);
       this.applyTask(task);
       if (!task.muteIfVisible || document.hidden) this.showLocalNotification(task);
     }, Math.max(0, task.fireAt - Date.now()));
     this.local.set(task.id, timer);
+    this.localTasks.set(task.id, task);
   },
 
   cancel(id){
@@ -5431,6 +5507,7 @@ const BG = {
   cancelLocal(id){
     const t = this.local.get(id);
     if (t) { clearTimeout(t); this.local.delete(id); }
+    this.localTasks.delete(id);
   },
 
   // 页面隐藏：把临近到期的自动写信 / 朋友圈提醒托付给 SW
@@ -5439,6 +5516,15 @@ const BG = {
     if (!st.bgKeepAlive) return;
     if (!this.ready) return;
     if (!this.canNotify()) return; // 没有通知权限时托付没有意义
+
+    // 仍在主线程排队、5 分钟内到期的任务（回复/测试等）一并交给 SW，避免冻结后丢失
+    const now = Date.now();
+    Array.from(this.localTasks.entries()).forEach(([id, task]) => {
+      if (!task || task.fireAt - now > this.HOLD) return;
+      this.cancelLocal(id);
+      this.call('SCHEDULE', { task });
+    });
+
     this.scheduleAuto('letter');
     this.scheduleAuto('moment');
   },
@@ -5830,6 +5916,21 @@ function bindGlobal(){
   $('#icoRedPacket').innerHTML = icon('gift', 28);
   $('#icoSticker').innerHTML = icon('smile', 28);
   $('#icoShareMusic').innerHTML = icon('music', 28);
+  $('#btnInlineSticker').innerHTML = icon('smile', 22);
+  $('#btnInlineImage').innerHTML = icon('image', 22);
+  $('#btnInlineSticker').addEventListener('click', () => {
+    const sp = $('#stickerPanel');
+    $('#toolPanel').classList.remove('show');
+    $('#btnToggleTool').classList.remove('active');
+    sp.classList.toggle('show');
+    if (sp.classList.contains('show')){ renderStickerPanel(); setTimeout(scrollToBottom, 300); }
+  });
+  $('#btnInlineImage').addEventListener('click', () => $('#chatImageInput').click());
+  $('#chatImageInput').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (f) sendChatImage(f);
+  });
 
   $('#btnToolRedPacket').addEventListener('click', () => {
     $('#toolPanel').classList.remove('show');
@@ -5901,6 +6002,7 @@ function init(){
   updateLetterBadge();
   applyCustomCss();
   applyChatBg();
+  applyNavClear();
 
   setInterval(checkAutoLetter, 30000);
   setInterval(checkAutoMoment, 30000);
