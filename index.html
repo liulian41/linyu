@@ -1944,6 +1944,27 @@ function runAutoReply(friendId){
   }
 }
 
+function scheduleFriendReturnRp(msgId, friendId){
+  if (Math.random() > 0.35) return;
+  const delay = 8000 + Math.random() * 16000;
+  setTimeout(() => {
+    const msgs = DB.chat(friendId);
+    const m = msgs.find(x => x.id === msgId);
+    if (!m || m.status !== 'pending' || m.from !== 'me') return;
+    const amt = parseFloat(m.amount) || 0;
+    m.status = 'returned';
+    const texts = ['红包就不收啦，心意我收下啦', '别破费啦，钱你留着', '下次见面你再请我～'];
+    const tm = { id: uid(), from: 'other', type: 'text',
+      text: texts[Math.floor(Math.random() * texts.length)], ts: Date.now() };
+    msgs.push(tm);
+    DB.setChat(friendId, msgs);
+    DB.setUserWallet(DB.userWallet() + amt);
+    if ((getCurrentFriend() || {}).id === friendId) renderChat();
+    else if (!BG.quiet) BG.notifyMessage(tm);
+    toast('对方退回了你的红包，¥' + amt.toFixed(2) + ' 已退回余额');
+  }, delay);
+}
+
 function sendRedPacket(amount, blessing) {
   const f = getCurrentFriend();
   if (!f) return;
@@ -1969,6 +1990,7 @@ function sendRedPacket(amount, blessing) {
     amount: amount, blessing: blessing, status: 'pending', ts: Date.now(),
     quote: quote
   });
+  scheduleFriendReturnRp(msgId, f.id);
 
   clearQuote();
 
@@ -4711,7 +4733,9 @@ function renderMoments(){
     const comments = (m.comments || []).length ? '<div class="moment-comments">' +
         m.comments.map(c => {
           const ca = authorOf(c.authorId);
-          return '<div class="cmt"><b>' + esc(ca.name) + '</b>：' + esc(c.text) + '</div>';
+          return '<div class="cmt" data-cmt-row="' + m.id + '" data-cmt-id="' + c.id + '">' +
+            '<b>' + esc(ca.name) + '</b>' + (c.replyToName ? ' 回复 <b>' + esc(c.replyToName) + '</b>' : '') +
+            '：' + esc(c.text) + '</div>';
         }).join('') + '</div>' : '';
     return '<div class="card moment-card" data-mid="' + m.id + '">' +
       '<div class="moment-head">' + avatarHTML(au.avatar, au.name, 40) +
@@ -4756,13 +4780,25 @@ function renderMoments(){
   scroll.querySelectorAll('[data-cmt]').forEach(btn => {
     btn.addEventListener('click', () => openCommentDialog(btn.dataset.cmt));
   });
+
+  scroll.querySelectorAll('[data-cmt-row]').forEach(row => {
+    row.addEventListener('click', () => {
+      const moments = DB.moments();
+      const m = moments.find(x => x.id === row.dataset.cmtRow);
+      if (!m) return;
+      const c = (m.comments || []).find(x => x.id === row.dataset.cmtId);
+      if (!c) return;
+      const ca = authorOf(c.authorId);
+      openCommentDialog(m.id, { id: c.id, name: ca.name });
+    });
+  });
 }
 
-function openCommentDialog(mid){
-  const body = '<div class="field"><label>评论内容</label>' +
-    '<textarea id="cmtText" rows="3" placeholder="说点什么…"></textarea></div>';
+function openCommentDialog(mid, replyTo){
+  const body = '<div class="field"><label>' + (replyTo ? '回复 ' + esc(replyTo.name) : '评论内容') + '</label>' +
+    '<textarea id="cmtText" rows="3" placeholder="' + (replyTo ? '回复 ' + esc(replyTo.name) + '…' : '说点什么…') + '"></textarea></div>';
   openModal({
-    title: '发表评论', bodyHTML: body,
+    title: replyTo ? '回复评论' : '发表评论', bodyHTML: body,
     actions: [
       { text: '取消' },
       { text: '发送', primary: true, onClick: (mask) => {
@@ -4772,7 +4808,9 @@ function openCommentDialog(mid){
           const m = moments.find(x => x.id === mid);
           if (!m) return false;
           m.comments = m.comments || [];
-          m.comments.push({ id: uid(), authorId: 'me', text, ts: Date.now() });
+          m.comments.push({ id: uid(), authorId: 'me', text, ts: Date.now(),
+            replyToId: replyTo ? replyTo.id : null,
+            replyToName: replyTo ? replyTo.name : null });
           DB.setMoments(moments);
           renderMoments();
           // 对方看到我的评论后，隔几秒用字卡库回一条
@@ -4789,7 +4827,8 @@ function openCommentDialog(mid){
               mm.comments = mm.comments || [];
               mm.comments.push({
                 id: uid(), authorId: friendId,
-                text: cards[Math.floor(Math.random() * cards.length)], ts: Date.now()
+                text: cards[Math.floor(Math.random() * cards.length)], ts: Date.now(),
+                replyToName: friendId === m.authorId ? (replyTo ? replyTo.name : null) : null
               });
               DB.setMoments(fresh);
               if (state.tab === 'moments') renderMoments();
@@ -5327,7 +5366,18 @@ function openCardLibrary(){
   }
 
   function bindCardLibActions(){
-  m.mask.querySelector('#btnAddGroup')?.addEventListener('click', () => {
+  if (m.mask.dataset.libActionsBound) return;
+  m.mask.dataset.libActionsBound = '1';
+  m.mask.addEventListener('click', (e) => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    const addBtn = t.closest('#btnAddGroup');
+    const bulkBtn = t.closest('#btnBulkAdd');
+    if (addBtn) { e.stopPropagation(); openAddGroup(); return; }
+    if (bulkBtn) { e.stopPropagation(); openBulkAdd(); }
+  });
+
+  function openAddGroup(){
     openModal({
       title: '新增分组',
       bodyHTML: '<div class="field"><label>分组名称</label><input type="text" id="ngname" placeholder="例如：日常回复"></div>',
@@ -5344,9 +5394,9 @@ function openCardLibrary(){
           } }
       ]
     });
-  });
+  }
 
-  m.mask.querySelector('#btnBulkAdd')?.addEventListener('click', () => {
+  function openBulkAdd(){
     const groups = DB.groups();
     if (!groups.length){ toast('请先创建一个分组'); return; }
     openModal({
@@ -5381,7 +5431,7 @@ function openCardLibrary(){
           } }
       ], bottom: true
     });
-  });
+  }
   }
 
   function bindStk(){
