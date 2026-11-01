@@ -714,118 +714,6 @@ body.no-anim .sticker-msg{animation:none;}
 </div>
 
 <script>
-/* ============================================================
-   [NEW] 后台保活与通知 Service Worker 桥接模块
-   ============================================================ */
-(function (global) {
-  var SW_URL = './sw.js';
-  var tasks = new Map();
-  var timers = new Map();
-  var reg = null;
-  var ready = false;
-
-  var genId = function () { return 't_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); };
-
-  function postToSW(msg, timeout) {
-    return new Promise(function (resolve) {
-      var sw = navigator.serviceWorker.controller || (reg && (reg.active || reg.waiting || reg.installing));
-      if (!sw) { resolve(null); return; }
-      var ch = new MessageChannel();
-      var done = false;
-      var tid = setTimeout(function () { finish(null); }, timeout || 4000);
-      function finish(v) { if (done) return; done = true; clearTimeout(tid); try { ch.port1.close(); } catch (e) {} resolve(v); }
-      ch.port1.onmessage = function (e) { finish(e.data); };
-      try { sw.postMessage(msg, [ch.port2]); } catch (e) { finish(null); }
-    });
-  }
-
-  async function init() {
-    if (!('serviceWorker' in navigator)) return false;
-    try {
-      reg = await navigator.serviceWorker.register(SW_URL, { scope: './' });
-      await navigator.serviceWorker.ready;
-      reg = (await navigator.serviceWorker.getRegistration('./')) || reg;
-    } catch (e) { return false; }
-
-    navigator.serviceWorker.addEventListener('message', function(event) {
-      var d = event.data || {};
-      if (d.type === 'TASK_FIRED' && d.task) {
-        // 如果在后台由 SW 触发了通知，主线程如果没被冻结，继续处理逻辑
-      }
-    });
-    ready = true;
-    return true;
-  }
-
-  async function schedule(opt) {
-    var task = { id: opt.id || genId(), fireAt: opt.fireAt || (Date.now() + (opt.delay || 0)), title: opt.title || '传讯', body: opt.body || '', tag: opt.tag || '', url: opt.url || location.href };
-    tasks.set(task.id, task);
-    if (task.fireAt <= Date.now()) return;
-
-    if (document.visibilityState === 'hidden' && task.fireAt - Date.now() <= 5 * 60 * 1000) {
-      var res = await postToSW({ type: 'SCHEDULE', task: task });
-      if (res && res.ok) return true;
-    }
-    
-    // 前台或超过5分钟，交给主线程定时器
-    var delay = task.fireAt - Date.now();
-    if (delay > 0x7fffffff) delay = 0x7fffffff;
-    timers.set(task.id, setTimeout(async function() {
-      timers.delete(task.id);
-      if (document.visibilityState === 'visible') {
-        toast(task.title + ': ' + task.body);
-      } else if (reg && Notification.permission === 'granted') {
-        try { await reg.showNotification(task.title, { body: task.body, tag: task.tag }); } catch(e){}
-      }
-    }, delay));
-    return true;
-  }
-
-  function cancelAll() {
-    tasks.clear();
-    timers.forEach(function(t){ clearTimeout(t); });
-    timers.clear();
-    postToSW({ type: 'RECLAIM' }).catch(function(){});
-  }
-
-  global.BgNotify = { init: init, schedule: schedule, cancelAll: cancelAll, isReady: function() { return ready; } };
-})(window);
-
-/* ============================================================
-   静音音频保活
-   ============================================================ */
-var KeepAlive = (function () {
-  var ctx = null, osc = null, gain = null, on = false;
-  async function startAudio() {
-    if (on) return true;
-    try {
-      var AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return false;
-      if (!ctx) ctx = new AC();
-      if (ctx.state === 'suspended') await ctx.resume();
-      if (!osc) {
-        osc = ctx.createOscillator();
-        gain = ctx.createGain();
-        gain.gain.value = 0.0001;
-        osc.frequency.value = 40;
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-      }
-      on = true;
-      return true;
-    } catch (e) { return false; }
-  }
-  function stopAudio() {
-    on = false;
-    try { if (osc) osc.stop(); } catch(e){}
-    osc = null;
-    try { if (ctx) ctx.close(); } catch(e){}
-    ctx = null;
-  }
-  return { startAudio: startAudio, stopAudio: stopAudio, isAudioOn: function () { return on; } };
-})();
-
 const ICONS = {
   phone:'<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
   phoneDown:'<path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 2 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" y1="1" x2="1" y2="23"/>',
@@ -1126,8 +1014,6 @@ const state = {
   typingTimer: null,
   typingEl: null,
   replyTimer: null,
-  replyFireAt: 0,
-  replyFriendId: null,
   togetherTimer: null,
   quoting: null
 };
@@ -1426,7 +1312,8 @@ function bindMessageEvents(){
           m.inviteStatus = 'accepted';
           DB.setChat(f.id, msgs);
           DB.setTogether({ friendId: f.id, status: 'active', startedAt: Date.now(), messageId: mid });
-          renderChat();
+           if (typeof CXPatch !== 'undefined') CXPatch.onInviteAccepted(mid, f.id);
+           renderChat();
           switchTab('music');
           if (!Player.playing) Player.play();
           toast('已接受邀请，开始一起听');
@@ -1510,82 +1397,6 @@ function pickRandomQuote(msgs){
   return { id: q.id, from: q.from, text: q.text || '', type: q.type, musicData: q.musicData, giftData: q.giftData };
 }
 
-// 处理对方自动回复的核心逻辑
-function triggerAutoReply(f) {
-  const currentMsgs = DB.chat(f.id);
-
-  // 对方发红包
-  if (Math.random() < 0.25) {
-    const amt = (Math.random() * 20 + 0.01).toFixed(2);
-    const blessings = ['恭喜发财', '大吉大利', '天天开心', '谢谢老板'];
-    const bless = blessings[Math.floor(Math.random() * blessings.length)];
-    
-    if (DB.friendWallet() >= parseFloat(amt)) {
-       DB.setFriendWallet(DB.friendWallet() - parseFloat(amt));
-       appendMessage({
-         id: uid(), from: 'other', type: 'redpacket',
-         amount: amt, blessing: bless, status: 'pending', ts: Date.now(),
-         quote: Math.random() < 0.35 ? pickRandomQuote(currentMsgs) : null
-       });
-       return;
-    }
-  }
-
-  // 对方邀请听歌
-  if (Math.random() < 0.1) {
-    appendMessage({
-      id: uid(), from: 'other', type: 'invite', inviteStatus: 'pending', ts: Date.now()
-    });
-    return;
-  }
-
-  // 对方分享歌曲
-  if (Math.random() < 0.2 && DB.playlist().length > 0) {
-    const list = DB.playlist();
-    const song = list[Math.floor(Math.random() * list.length)];
-    appendMessage({
-      id: uid(), from: 'other', type: 'music',
-      musicData: song, ts: Date.now(),
-      quote: Math.random() < 0.35 ? pickRandomQuote(currentMsgs) : null
-    });
-    return;
-  }
-  
-  // 对方送礼物
-  if (Math.random() < 0.15 && DB.friendWallet() > 50) {
-     const products = DB.products();
-     if (products.length) {
-       const p = products[Math.floor(Math.random() * products.length)];
-       if (DB.friendWallet() >= p.price) {
-          DB.setFriendWallet(DB.friendWallet() - p.price);
-          appendMessage({
-             id: uid(), from: 'other', type: 'gift', giftData: p, ts: Date.now()
-          });
-          return;
-       }
-     }
-  }
-
-  const replyQuote = Math.random() < 0.4 ? pickRandomQuote(currentMsgs) : null;
-
-  const activePool = getAllCards();
-  if (activePool.length) {
-    const pick = activePool[Math.floor(Math.random() * activePool.length)];
-    appendMessage({
-      id: uid(), from: 'other', type: pick.type,
-      text: pick.content, ts: Date.now(),
-      quote: replyQuote
-    });
-  }
-
-  // 概率来电
-  if (Math.random() < 0.05 && Call.state === 'idle') {
-     setTimeout(() => {
-        if (Call.state === 'idle') Call.simulateIncoming();
-     }, 2000 + Math.random() * 3000);
-  }
-}
-
 function sendMessage(isSticker, stickerUrl){
   const f = getCurrentFriend();
   if (!f) return;
@@ -1625,32 +1436,91 @@ function sendMessage(isSticker, stickerUrl){
   const max = Number(st.waitMax) || 0;
   const lo = Math.min(min, max), hi = Math.max(min, max);
   const wait = Math.max(0, lo + Math.random() * (hi - lo));
-  const waitMs = Math.round(wait * 1000);
 
   if (state.replyTimer) clearTimeout(state.replyTimer);
   state.typingTimer = true;
   showTypingIndicator();
 
-  state.replyFireAt = Date.now() + waitMs;
-  state.replyFriendId = f.id;
-
-  // 如果页面切后台，交给 SW 接管通知
-  if (document.visibilityState === 'hidden' && waitMs <= 5 * 60 * 1000) {
-    BgNotify.schedule({
-      fireAt: state.replyFireAt,
-      title: f.name,
-      body: '对方给你发来一条新消息',
-      tag: 'chat_reply'
-    });
-  }
-
   state.replyTimer = setTimeout(() => {
     state.replyTimer = null;
-    state.replyFireAt = 0;
     state.typingTimer = null;
     hideTypingIndicator();
-    triggerAutoReply(f);
-  }, waitMs);
+
+    const currentMsgs = DB.chat(f.id);
+
+    // 对方发红包
+    if (Math.random() < 0.25) {
+      const amt = (Math.random() * 20 + 0.01).toFixed(2);
+      const blessings = ['恭喜发财', '大吉大利', '天天开心', '谢谢老板'];
+      const bless = blessings[Math.floor(Math.random() * blessings.length)];
+      
+      if (DB.friendWallet() >= parseFloat(amt)) {
+         DB.setFriendWallet(DB.friendWallet() - parseFloat(amt));
+         appendMessage({
+           id: uid(), from: 'other', type: 'redpacket',
+           amount: amt, blessing: bless, status: 'pending', ts: Date.now(),
+           quote: Math.random() < 0.35 ? pickRandomQuote(currentMsgs) : null
+         });
+         return;
+      }
+    }
+
+    // 对方邀请听歌（去重：CXPatch 管 TTL / 已有进行中邀请 / 免打扰）
+    if (typeof CXPatch !== 'undefined' ? CXPatch.shouldGenerateIncomingInvite(fid) : (Math.random() < 0.1)) {
+      appendMessage({
+        id: uid(), from: 'other', type: 'invite', inviteStatus: 'pending', ts: Date.now()
+      });
+      return;
+    }
+
+    // 对方分享歌曲
+    if (Math.random() < 0.2 && DB.playlist().length > 0) {
+      const list = DB.playlist();
+      const song = list[Math.floor(Math.random() * list.length)];
+      appendMessage({
+        id: uid(), from: 'other', type: 'music',
+        musicData: song, ts: Date.now(),
+        quote: Math.random() < 0.35 ? pickRandomQuote(currentMsgs) : null
+      });
+      return;
+    }
+    
+    // 对方送礼物
+    if (Math.random() < 0.15 && DB.friendWallet() > 50) {
+       const products = DB.products();
+       if (products.length) {
+         const p = products[Math.floor(Math.random() * products.length)];
+         if (DB.friendWallet() >= p.price) {
+            DB.setFriendWallet(DB.friendWallet() - p.price);
+            appendMessage({
+               id: uid(), from: 'other', type: 'gift', giftData: p, ts: Date.now()
+            });
+            return;
+         }
+       }
+    }
+
+    const replyQuote = Math.random() < 0.4 ? pickRandomQuote(currentMsgs) : null;
+
+    const activePool = getAllCards();
+    if (activePool.length) {
+      const pick = activePool[Math.floor(Math.random() * activePool.length)];
+      appendMessage({
+        id: uid(), from: 'other', type: pick.type,
+        text: pick.content, ts: Date.now(),
+        quote: replyQuote
+      });
+    } else {
+      // 没有字卡时不发送任何文本
+    }
+
+    // 概率来电
+    if (Math.random() < 0.05 && Call.state === 'idle') {
+       setTimeout(() => {
+          if (Call.state === 'idle') Call.simulateIncoming();
+       }, 2000 + Math.random() * 3000);
+    }
+  }, Math.round(wait * 1000));
 }
 
 function sendRedPacket(amount, blessing) {
@@ -1686,7 +1556,6 @@ function sendRedPacket(amount, blessing) {
   const max = Number(st.waitMax) || 0;
   const lo = Math.min(min, max), hi = Math.max(min, max);
   const wait = Math.max(1, lo + Math.random() * (hi - lo));
-  const waitMs = Math.round(wait * 1000);
 
   if (state.replyTimer) clearTimeout(state.replyTimer);
   state.typingTimer = true;
@@ -1707,7 +1576,7 @@ function sendRedPacket(amount, blessing) {
       
       renderChat();
     }
-  }, waitMs);
+  }, Math.round(wait * 1000));
 }
 
 function openSendRedPacketModal() {
@@ -2505,26 +2374,37 @@ function autoSimulateShop() {
   if (!products.length) return;
   const p = products[Math.floor(Math.random() * products.length)];
   const actionType = Math.random();
+  const action = actionType < 0.33 ? 'req_pay' : (actionType < 0.66 ? 'buy' : 'wish');
   
-  if (actionType < 0.33) {
+  // 推送去重：wish / req_pay 同商品 5 分钟内只推一次（buy 放行）
+  if (typeof CXPatch !== 'undefined' && CXPatch.allowOrderPush &&
+      !CXPatch.allowOrderPush(action, p.name, p.price)) {
+    return;
+  }
+  
+  if (action === 'req_pay') {
      orders.push({
-       id: uid(), from: 'other', action: 'req_pay', productName: p.name, price: p.price, ts: Date.now(), status: 'pending'
+        id: uid(), from: 'other', action: 'req_pay', productName: p.name, price: p.price, ts: Date.now(), status: 'pending'
      });
      toast('对方请求你代付一件商品');
-  } else if (actionType < 0.66) {
+  } else if (action === 'buy') {
      orders.push({
-       id: uid(), from: 'other', action: 'buy', productName: p.name, price: p.price, ts: Date.now(), status: 'done'
+        id: uid(), from: 'other', action: 'buy', productName: p.name, price: p.price, ts: Date.now(), status: 'done'
      });
      if (Math.random() > 0.3) {
         appendMessage({ id: uid(), from: 'other', type: 'gift', giftData: p, ts: Date.now() });
      }
   } else {
      orders.push({
-       id: uid(), from: 'other', action: 'wish', productName: p.name, price: p.price, ts: Date.now(), status: 'pending'
+        id: uid(), from: 'other', action: 'wish', productName: p.name, price: p.price, ts: Date.now(), status: 'pending'
      });
      toast('对方许下了一个心愿');
   }
   DB.setOrders(orders);
+  // 订单落定登记，写入去重历史
+  if (typeof CXPatch !== 'undefined' && CXPatch.settleOrder) {
+    CXPatch.settleOrder(action, p.name, p.price);
+  }
   if (state.tab === 'shop') renderShop();
 }
 
@@ -2645,7 +2525,8 @@ function checkAutoLetter() {
     const st = DB.settings();
     if (!st.autoLetter) return;
     
-    if (Math.random() > 0.3) return;
+    // 频率控制交给 CXPatch（间隔 + 每日上限 + 免打扰时段）
+    if (typeof CXPatch === 'undefined' || !CXPatch.allowAutoLetter()) return;
     
     const letters = DB.letters();
     const lastLetter = letters[letters.length - 1];
@@ -2684,6 +2565,7 @@ function checkAutoLetter() {
     if (letters.length > 50) letters.shift();
     
     DB.setLetters(letters);
+    if (typeof CXPatch !== 'undefined') CXPatch.noteLetterPosted();
     updateLetterBadge();
     if (document.getElementById('letterScreen').classList.contains('show')) renderLetterList();
 }
@@ -2849,7 +2731,8 @@ function checkAutoMoment() {
     const st = DB.settings();
     if (!st.autoMoment) return;
     
-    if (Math.random() > 0.3) return;
+    // 频率控制交给 CXPatch（间隔 + 每日上限 + 免打扰时段）
+    if (typeof CXPatch === 'undefined' || !CXPatch.allowAutoMoment()) return;
     
     const moments = DB.moments();
     const lastMoment = moments[moments.length - 1];
@@ -2887,6 +2770,7 @@ function checkAutoMoment() {
         comments: []
     });
     DB.setMoments(moments);
+    if (typeof CXPatch !== 'undefined') CXPatch.noteMomentPosted();
     renderMoments();
     toast(f.name + ' 发布了新朋友圈');
 }
@@ -3743,22 +3627,10 @@ function renderMe(){
       '<button class="row" id="rowLetterbox">' +
         '<span class="r-label" style="display:flex;align-items:center;gap:8px;">信箱' + (hasUnreadLetter ? '<span style="background:var(--danger);color:#fff;font-size:10px;padding:2px 6px;border-radius:10px;">新信件</span>' : '') + '</span>' +
         '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button>' +
-    '</div>' +
-    '<div class="group-title">后台与通知</div>' +
-    '<div class="group">' +
-      '<div class="row" id="rowNotifyPerm">' +
-        '<span class="r-label">通知权限</span>' +
-        '<span class="r-value" id="notifyPermStatus">' + (('Notification' in window) ? (Notification.permission === 'granted' ? '已授权' : (Notification.permission === 'denied' ? '已拒绝' : '未授权')) : '不支持') + '</span>' +
-        '<span class="r-chev">' + icon('chevronRight', 18) + '</span>' +
-      '</div>' +
-      '<div class="row" id="rowKeepAlive">' +
-        '<span class="r-label">静音音频保活</span>' +
-        '<span class="switch ' + (KeepAlive.isAudioOn() ? 'on' : '') + '" id="swKeepAlive"></span>' +
-      '</div>' +
-      '<div class="row" id="rowInstallApp" style="display:none;">' +
-        '<span class="r-label" style="color:var(--blue);">添加到主屏幕</span>' +
-        '<span class="r-chev">' + icon('arrowUp', 18) + '</span>' +
-      '</div>' +
+      '<button class="row" id="rowCxFrequency">' +
+        '<span class="r-label">自动化与后台保活</span>' +
+        '<span class="r-value">频率 / 通知</span>' +
+        '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button>' +
     '</div>' +
     '<div class="group-title">外观</div>' +
     '<div class="group"><button class="row" id="rowTheme">' +
@@ -3820,41 +3692,18 @@ function renderMe(){
   $('#rowImport').addEventListener('click', importData);
   $('#rowClearAll').addEventListener('click', clearAllData);
   $('#rowAbout').addEventListener('click', openAbout);
-  $('#rowLetterbox').addEventListener('click', openLetterbox);
+$('#rowLetterbox').addEventListener('click', openLetterbox);
 
-  // 后台与通知事件
-  $('#rowNotifyPerm').addEventListener('click', async () => {
-    if (!('Notification' in window)) { toast('当前浏览器不支持通知'); return; }
-    const p = await Notification.requestPermission();
-    $('#notifyPermStatus').textContent = p === 'granted' ? '已授权' : (p === 'denied' ? '已拒绝' : '未授权');
-    toast('权限状态: ' + p);
-  });
-
-  $('#rowKeepAlive').addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const sw = $('#swKeepAlive');
-    if (KeepAlive.isAudioOn()) {
-      KeepAlive.stopAudio();
-      sw.classList.remove('on');
-      toast('静音保活已关闭');
-    } else {
-      const ok = await KeepAlive.startAudio();
-      if (ok) { sw.classList.add('on'); toast('静音保活已开启'); }
-      else { toast('开启失败，请重试'); }
-    }
-  });
-
-  if (window.__deferredInstallPrompt) {
-    $('#rowInstallApp').style.display = 'flex';
-    $('#rowInstallApp').addEventListener('click', () => {
-      if (window.__deferredInstallPrompt) {
-        window.__deferredInstallPrompt.prompt();
-        window.__deferredInstallPrompt = null;
-        $('#rowInstallApp').style.display = 'none';
+  // 自动化与后台保活 设置入口（Patch 层）
+  const cxFreq = $('#rowCxFrequency');
+  if (cxFreq) {
+    cxFreq.addEventListener('click', function () {
+      if (typeof CXPatch !== 'undefined' && CXPatch.openFrequencySettings) {
+        CXPatch.openFrequencySettings();
+      } else {
+        toast('扩展模块未加载');
       }
     });
-  } else {
-    $('#rowInstallApp').style.display = 'none';
   }
 
   const saveSettings = () => {
@@ -4533,31 +4382,6 @@ function bindGlobal(){
   $('#btnAddProduct').addEventListener('click', openAddProductModal);
   $('#btnViewWishlist').innerHTML = icon('wish', 22);
   $('#btnViewWishlist').addEventListener('click', openWishlist);
-
-  // 全局监听切回前台，检查是否有过期未执行的自动回复
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && state.replyFireAt) {
-       if (Date.now() >= state.replyFireAt) {
-          clearTimeout(state.replyTimer);
-          state.replyTimer = null;
-          const f = DB.friends().find(x => x.id === state.replyFriendId);
-          if (f) {
-            state.replyFireAt = 0;
-            state.replyFriendId = null;
-            state.typingTimer = null;
-            hideTypingIndicator();
-            triggerAutoReply(f);
-          }
-       }
-    }
-  });
-
-  // 添加到主屏幕
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    window.__deferredInstallPrompt = e;
-    if (state.tab === 'me') renderMe();
-  });
 }
 
 function init(){
@@ -4571,9 +4395,6 @@ function init(){
     state.currentFriendId = friends[0].id;
     DB.setCurrentFriend(state.currentFriendId);
   }
-
-  BgNotify.init();
-
   bindGlobal();
   Player.init();
   renderChat();
@@ -4603,5 +4424,16 @@ function init(){
 
 document.addEventListener('DOMContentLoaded', init);
 </script>
+
+<!-- ===== 传讯 Patch 层：后台保活 / 频率控制 / 邀请去重 / 订单推送去重 ===== -->
+<!-- 顺序不可颠倒：bg-bridge 提供 window.Bg，patch-features 依赖它 -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="传讯">
+<link rel="apple-touch-icon" href="./v2/icon-192.png">
+<script src="./v2/bg-bridge.js"></script>
+<script src="./v2/patch-features.js"></script>
 </body>
 </html>
