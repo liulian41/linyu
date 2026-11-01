@@ -12,7 +12,7 @@
 <script>
 /* 版本自检：GitHub Pages 的 HTML 会缓存 10 分钟，旧页面在这里发现线上版本更新后自动带参数重载 */
 (function(){
-  var BUILD = '20261103a';
+  var BUILD = '20261103b';
   try{
     fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function(r){ return r.json(); })
@@ -224,7 +224,7 @@ body.no-anim .sticker-msg{animation:none;}
 .rp-card.expanded .rp-cross{transform:rotate(45deg);background:var(--fill-2);}
 .rp-detail{max-height:0;overflow:hidden;transition:max-height .4s var(--ease);
   background:var(--bg-elevated);backdrop-filter:blur(10px);}
-.rp-card.expanded .rp-detail{max-height:160px;}
+.rp-card.expanded .rp-detail{max-height:420px;}
 .rp-detail-inner{padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:14px;
   border-top:.5px solid var(--sep);}
 .rp-amount{font-size:28px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
@@ -1005,6 +1005,7 @@ const DB = {
       autoLetter: false, letterUseSticker: true, letterCardsCount: 2,
       letterMinH: 1, letterMaxH: 3,
       autoMoment: false, momentCardsCount: 2, momentMinH: 1, momentMaxH: 3,
+      momentReplyMin: 3, momentReplyMax: 9, momentReplyUnit: 's',
       bgKeepAlive: true, silentAudio: false,
       ncmApi: '',
       chatBg: false, customCss: '',
@@ -1394,6 +1395,19 @@ function getTextCards(){
     (g.cards || []).forEach(c => { if (c && c.trim()) out.push(c); });
   });
   return out;
+}
+// 从字卡库抽一条，尽量不和上几次重复
+function pickCardText(exclude){
+  let cards = Array.from(new Set(getTextCards()));
+  if (!cards.length) return '';
+  let pool = cards.filter(t => t !== exclude);
+  if (!pool.length) pool = cards;
+  const recent = state.recentCards || [];
+  let fresh = pool.filter(t => recent.indexOf(t) === -1);
+  if (!fresh.length) fresh = pool;
+  const t = fresh[Math.floor(Math.random() * fresh.length)];
+  state.recentCards = recent.concat(t).slice(-6);
+  return t;
 }
 
 function clearQuote(){ state.quoting = null; renderQuotePreview(); }
@@ -4922,17 +4936,21 @@ function openCommentDialog(mid, replyTo){
           const friendId = m.authorId !== 'me' ? m.authorId : (getCurrentFriend() || {}).id;
           const willReply = friendId && (m.authorId !== 'me' || Math.random() < 0.4);
           if (willReply){
-            const delay = 3000 + Math.random() * 6000;
+            const st = DB.settings();
+            const unitMs = st.momentReplyUnit === 'm' ? 60000 : 1000;
+            const rmin = Math.max(0, Number(st.momentReplyMin) || 0);
+            const rmax = Math.max(rmin, Number(st.momentReplyMax) || 0);
+            const delay = (rmin + Math.random() * (rmax - rmin)) * unitMs;
             setTimeout(() => {
               const fresh = DB.moments();
               const mm = fresh.find(x => x.id === mid);
               if (!mm) return;
-              const cards = getTextCards();
-              if (!cards.length) return;
+              const replyText = pickCardText(text);
+              if (!replyText) return;
               mm.comments = mm.comments || [];
               mm.comments.push({
                 id: uid(), authorId: friendId,
-                text: cards[Math.floor(Math.random() * cards.length)], ts: Date.now(),
+                text: replyText, ts: Date.now(),
                 replyToName: friendId === m.authorId ? (replyTo ? replyTo.name : null) : null
               });
               DB.setMoments(fresh);
@@ -4997,7 +5015,7 @@ function openPostMoment(){
                           mm.comments.push({
                               id: uid(), 
                               authorId: friend.id, 
-                              text: cards[Math.floor(Math.random() * cards.length)], 
+                              text: pickCardText(text), 
                               ts: Date.now()
                           });
                       }
@@ -5102,6 +5120,19 @@ function renderMe(){
           '<span style="color:var(--text-secondary);">~</span>' +
           '<input class="num-input" id="setMomentMaxH" type="number" min="1" max="168" value="' + esc(st.momentMaxH||3) + '">' +
         '</div></div>' +
+      '<div class="row" style="flex-wrap:wrap;gap:10px;">' +
+        '<span class="r-label" style="flex:1 1 100%;font-size:15px;">朋友圈评论回复延迟</span>' +
+        '<div style="display:flex;align-items:center;gap:8px;width:100%;">' +
+          '<input class="num-input" id="setMomentReplyMin" type="number" min="0" step="1" value="' + esc(st.momentReplyMin) + '">' +
+          '<span style="color:var(--text-secondary);">~</span>' +
+          '<input class="num-input" id="setMomentReplyMax" type="number" min="0" step="1" value="' + esc(st.momentReplyMax) + '">' +
+          '<select class="num-input" id="setMomentReplyUnit" style="width:auto;padding-right:8px;">' +
+            '<option value="s"' + (st.momentReplyUnit !== 'm' ? ' selected' : '') + '>秒</option>' +
+            '<option value="m"' + (st.momentReplyUnit === 'm' ? ' selected' : '') + '>分钟</option>' +
+          '</select>' +
+        '</div>' +
+        '<span style="flex:1 1 100%;font-size:12px;color:var(--text-tertiary);white-space:normal;">回复内容从字卡库随机抽取，不会重复上一句</span>' +
+      '</div>' +
     '</div>' +
     '<div class="group-title">内容</div>' +
     '<div class="group"><button class="row" id="rowCards">' +
@@ -5191,6 +5222,10 @@ function renderMe(){
     const mmax = Math.max(mmin, clampH($('#setMomentMaxH').value, mmin));
     cur.letterMinH = lmin; cur.letterMaxH = lmax;
     cur.momentMinH = mmin; cur.momentMaxH = mmax;
+    const rmin = Math.max(0, parseFloat($('#setMomentReplyMin').value) || 0);
+    const rmax = Math.max(rmin, parseFloat($('#setMomentReplyMax').value) || 0);
+    cur.momentReplyMin = rmin; cur.momentReplyMax = rmax;
+    cur.momentReplyUnit = $('#setMomentReplyUnit').value === 'm' ? 'm' : 's';
     cur.replyBurst = Math.max(1, Math.min(5, parseInt($('#setReplyBurst').value, 10) || 1));
     DB.setSettings(cur);
     $('#setWaitMin').value = cur.waitMin;
@@ -5199,6 +5234,9 @@ function renderMe(){
     $('#setMomentCount').value = cur.momentCardsCount;
     $('#setLetterMinH').value = cur.letterMinH; $('#setLetterMaxH').value = cur.letterMaxH;
     $('#setMomentMinH').value = cur.momentMinH; $('#setMomentMaxH').value = cur.momentMaxH;
+    $('#setMomentReplyMin').value = cur.momentReplyMin;
+    $('#setMomentReplyMax').value = cur.momentReplyMax;
+    $('#setMomentReplyUnit').value = cur.momentReplyUnit;
     $('#setReplyBurst').value = cur.replyBurst;
   };
   $('#setWaitMin').addEventListener('change', saveSettings);
@@ -5209,6 +5247,9 @@ function renderMe(){
   $('#setLetterMaxH').addEventListener('change', saveSettings);
   $('#setMomentMinH').addEventListener('change', saveSettings);
   $('#setMomentMaxH').addEventListener('change', saveSettings);
+  $('#setMomentReplyMin').addEventListener('change', saveSettings);
+  $('#setMomentReplyMax').addEventListener('change', saveSettings);
+  $('#setMomentReplyUnit').addEventListener('change', saveSettings);
   $('#setReplyBurst').addEventListener('change', saveSettings);
 
   $('#rowAnim').addEventListener('click', () => {
