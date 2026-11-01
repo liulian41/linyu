@@ -1434,10 +1434,10 @@ function msgHTML(m, prevTs){
     html += '<div class="msg-row ' + (m.from === 'me' ? 'me' : 'other') + '" style="flex-direction:column;align-items:' + (m.from === 'me' ? 'flex-end' : 'flex-start') + ';">' +
       (m.quote ? '<div style="max-width:240px;width:100%;">' + buildQuoteHTML(m.quote) + '</div>' : '') +
       '<div class="music-card" data-msg="' + m.id + '" data-play-music=\'' + JSON.stringify(song) + '\'>' +
-        '<img class="music-cover" src="' + esc(song.cover || '') + '">' +
+        '<img class="music-cover" src="' + esc(songCover(song)) + '" onerror="this.style.display=\'none\'">' +
         '<div class="music-info">' +
            '<div class="music-name">' + esc(song.name) + '</div>' +
-           '<div class="music-artist">' + esc(song.artist) + '</div>' +
+           '<div class="music-artist">' + esc(song.artist || '未知歌手') + '</div>' +
         '</div>' +
         '<div class="music-play-btn">' + icon('play', 14) + '</div>' +
       '</div>' +
@@ -1929,7 +1929,7 @@ function openShareMusicModal() {
    const listHTML = list.length ? list.map((s, i) =>
      '<button class="picker-item" data-song-idx="' + i + '">' +
        '<div style="width:40px;height:40px;border-radius:10px;overflow:hidden;flex-shrink:0;background:var(--fill-1);display:flex;align-items:center;justify-content:center;color:var(--text-tertiary);">' +
-         (s.cover ? '<img src="' + esc(s.cover) + '" style="width:100%;height:100%;object-fit:cover;">' : icon('music', 18)) +
+         (songCover(s) ? '<img loading="lazy" src="' + esc(songCover(s)) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\'">' : icon('music', 18)) +
        '</div>' +
        '<div style="flex:1;min-width:0;text-align:left;">' +
          '<div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);">' + esc(s.name) + '</div>' +
@@ -2059,7 +2059,8 @@ function openShareMusicModal() {
    });
 }
 
-function doShareMusic(song) {
+async function doShareMusic(song) {
+   song = await enrichSong(song);
    const quote = state.quoting ? {
      id: state.quoting.id, from: state.quoting.from,
      text: state.quoting.text, type: state.quoting.type,
@@ -2485,12 +2486,13 @@ function editWallet(target) {
   const currentVal = isUser ? DB.userWallet() : DB.friendWallet();
   const m = openModal({
     title: isUser ? '修改我的余额' : '修改对方余额',
-    bodyHTML: `<div class="field"><label>输入金额</label><input type="number" id="walletInput" value="${currentVal}" step="0.01"></div>`,
+    bodyHTML: `<div class="field"><label>输入金额</label><input type="number" id="walletInput" value="${Number(currentVal).toFixed(2)}" step="0.01"></div>`,
     actions: [
       { text: '取消' },
       { text: '保存', primary: true, onClick: (mask) => {
-          const val = parseFloat(mask.querySelector('#walletInput').value);
+          let val = parseFloat(mask.querySelector('#walletInput').value);
           if (isNaN(val) || val < 0) { toast('请输入有效金额'); return false; }
+          val = Math.round(val * 100) / 100;
           if (isUser) DB.setUserWallet(val); else DB.setFriendWallet(val);
           renderShop();
         } }
@@ -4032,15 +4034,15 @@ function renderMusic(){
   // 一起听时把账号 VIP 状态同步展示
   if (together && together.status === 'active' && NCM.vipLabel()) statusText += ' · ' + NCM.vipLabel() + ' 已同步';
 
-  const coverInner = song && song.cover
-    ? '<img src="' + esc(song.cover) + '" alt="">'
+  const coverInner = song && songCover(song)
+    ? '<img src="' + esc(songCover(song)) + '" alt="" onerror="this.style.display=\'none\'">'
     : icon('music', 30);
 
   const songRows = list.length
     ? list.map((s, i) =>
         '<div class="song-item ' + (i === Player.index ? 'playing' : '') + '" data-idx="' + i + '">' +
           '<div class="s-idx">' + (i + 1) + '</div>' +
-          '<div class="s-cover">' + (songCover(s) ? '<img src="' + esc(songCover(s)) + '" alt="" onerror="this.style.display=\'none\'">' : icon('music', 18)) + '</div>' +
+          '<div class="s-cover">' + (songCover(s) ? '<img loading="lazy" src="' + esc(songCover(s)) + '" alt="" onerror="this.style.display=\'none\'">' : icon('music', 18)) + '</div>' +
           '<div class="s-info">' +
             '<div class="s-name">' + esc(s.name) + '</div>' +
             '<div class="s-artist">' + esc(s.artist || '未知歌手') + '</div>' +
@@ -4268,9 +4270,52 @@ function fetchWithTimeout(url, ms){
 function badCover(url){
   return !!url && url.indexOf('api.i-meto.com') > -1;
 }
+function metingPic(nid){
+  return nid ? 'https://api.injahow.cn/meting/?type=pic&id=' + encodeURIComponent(String(nid)) : '';
+}
 function songCover(s){
   if (!s) return '';
-  return (s.cover && !badCover(s.cover)) ? s.cover : '';
+  if (s.cover && !badCover(s.cover)) return s.cover;
+  // 旧数据没有封面时，按歌曲 id 现取（meting 会 302 到网易云 CDN）
+  return metingPic(s.nid);
+}
+
+/* 旧歌单可能只存了 id/名字，缺歌手和封面：按需向 meting 补全 */
+async function enrichSong(song){
+  if (!song) return song;
+  const hasArtist = song.artist && song.artist !== '未知歌手';
+  if (hasArtist && song.cover && !badCover(song.cover)) return song;
+  if (!song.nid) return song;
+  const nodes = [
+    'https://api.injahow.cn/meting/?type=song&id=',
+    'https://api.qijieya.cn/meting/?type=song&id='
+  ];
+  for (const base of nodes){
+    try {
+      const res = await fetchWithTimeout(base + encodeURIComponent(String(song.nid)), 8000);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const it = Array.isArray(data) ? data[0] : (data && data.data ? data.data[0] : data);
+      if (!it) continue;
+      let cover = it.pic || it.cover || '';
+      if (cover.startsWith('http://')) cover = cover.replace('http://', 'https://');
+      const artist = getArtistName(it);
+      if ((!song.artist || song.artist === '未知歌手') && artist && artist !== '未知歌手') song.artist = artist;
+      if ((!song.cover || badCover(song.cover)) && cover && !badCover(cover)) song.cover = cover;
+      if (song.name === '未知歌曲' && it.name) song.name = it.name;
+      // 回写歌单，后续渲染直接用上
+      const pl = DB.playlist();
+      const hit = pl.find(x => x.id === song.id || (song.nid && String(x.nid) === String(song.nid)));
+      if (hit){
+        if (song.artist) hit.artist = song.artist;
+        if (song.cover) hit.cover = song.cover;
+        if (song.name) hit.name = song.name;
+        DB.setPlaylist(pl);
+      }
+      return song;
+    } catch (e) {}
+  }
+  return song;
 }
 
 async function fetchNeteasePlaylist(link){
@@ -4579,6 +4624,26 @@ function openCommentDialog(mid){
           m.comments.push({ id: uid(), authorId: 'me', text, ts: Date.now() });
           DB.setMoments(moments);
           renderMoments();
+          // 对方看到我的评论后，隔几秒用字卡库回一条
+          const friendId = m.authorId !== 'me' ? m.authorId : (getCurrentFriend() || {}).id;
+          const willReply = friendId && (m.authorId !== 'me' || Math.random() < 0.4);
+          if (willReply){
+            const delay = 3000 + Math.random() * 6000;
+            setTimeout(() => {
+              const fresh = DB.moments();
+              const mm = fresh.find(x => x.id === mid);
+              if (!mm) return;
+              const cards = getTextCards();
+              if (!cards.length) return;
+              mm.comments = mm.comments || [];
+              mm.comments.push({
+                id: uid(), authorId: friendId,
+                text: cards[Math.floor(Math.random() * cards.length)], ts: Date.now()
+              });
+              DB.setMoments(fresh);
+              if (state.tab === 'moments') renderMoments();
+            }, delay);
+          }
           toast('评论已发送');
           return true;
         } }
