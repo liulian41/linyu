@@ -602,6 +602,13 @@ body.no-anim .sticker-msg{animation:none;}
 .ncm-together .ts{font-size:10.5px;opacity:.68;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .ncm-avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;background:rgba(255,255,255,.2);flex-shrink:0;}
 .ncm-hero .btn.ghost{background:rgba(255,255,255,.16);color:#fff;border:none;}
+.ncm-modes{display:flex;gap:6px;justify-content:center;}
+.ncm-modes button{font-size:11px;padding:5px 12px;border-radius:999px;
+  background:rgba(255,255,255,.14);color:#fff;opacity:.72;transition:all .2s var(--ease);}
+.ncm-modes button.on{background:rgba(255,255,255,.94);color:#1c1c1e;opacity:1;font-weight:600;}
+.ncm-tabs{display:flex;gap:8px;margin-bottom:10px;}
+.ncm-tab{font-size:13px;padding:6px 12px;border-radius:9px;background:var(--fill-1);color:var(--text-secondary);}
+.ncm-tab.on{background:var(--blue);color:#fff;font-weight:600;}
 </style>
 </head>
 <body>
@@ -926,7 +933,12 @@ const DB = {
   setStickers: v => S.set('stickers', v),
   playlist: () => S.get('playlist', []),
   setPlaylist: v => S.set('playlist', v),
-  liked: () => S.get('liked', []),
+  liked: () => {
+    const raw = S.get('liked', []);
+    return (Array.isArray(raw) ? raw : [])
+      .map(x => typeof x === 'string' ? { nid: x, name: '', artist: '', cover: '' } : (x || {}))
+      .filter(x => x && x.nid);
+  },
   setLiked: v => S.set('liked', v),
   moments: () => S.get('moments', []),
   setMoments: v => S.set('moments', v),
@@ -3149,6 +3161,7 @@ const Player = {
     this.audio.src = srcUrl;
     this.audio.volume = this.volume;
     this.audio.load();
+    this.audio.loop = (this.mode === 'repeat');
     this.currentNid = song.nid || null;
 
     if (autoplay){
@@ -3194,9 +3207,11 @@ const Player = {
       this.reserved = null;
       if (auto) toast('播放 TA 预约的那一首', 1800);
     } else if (this.mode === 'heart'){
-      const liked = DB.liked().map(String);
+      const liked = DB.liked().map(o => String(o.nid));
       const cands = list.map((s, i) => ({ s, i })).filter(o => o.s.nid && liked.indexOf(String(o.s.nid)) > -1 && o.i !== this.index);
       idx = cands.length ? cands[Math.floor(Math.random() * cands.length)].i : this.randomIndex(list);
+    } else if (this.mode === 'repeat'){
+      idx = this.index >= 0 ? this.index : 0;
     } else if (this.mode === 'roam'){
       idx = this.randomIndex(list);
     } else {
@@ -3215,8 +3230,10 @@ const Player = {
 
   setMode(m){
     this.mode = m;
+    if (this.audio) this.audio.loop = (m === 'repeat');
     renderMusic();
-    toast(m === 'heart' ? '心动模式：只放你收藏过的歌' : m === 'roam' ? '随机漫游：随便走走' : '顺序播放');
+    if ((m === 'heart' || m === 'roam') && DB.playlist().length > 1) this.next(true);
+    toast(m === 'heart' ? '心动模式：只放你收藏过的歌' : m === 'roam' ? '随机漫游：随便走走' : m === 'repeat' ? '单曲循环' : '顺序播放');
   },
 
   async toggleLike(){
@@ -3224,9 +3241,10 @@ const Player = {
     const song = list[this.index];
     if (!song || !song.nid) { toast('这首歌无法收藏'); return; }
     const nid = String(song.nid);
-    const liked = DB.liked().map(String);
-    const i = liked.indexOf(nid);
-    if (i > -1) liked.splice(i, 1); else liked.push(nid);
+    const liked = DB.liked();
+    const i = liked.findIndex(o => String(o.nid) === nid);
+    if (i > -1) liked.splice(i, 1);
+    else liked.push({ nid: nid, name: song.name || '', artist: song.artist || '', cover: song.cover || '' });
     DB.setLiked(liked);
     renderMusic();
     toast(i > -1 ? '已取消收藏' : '已收藏到「我喜欢」');
@@ -3242,16 +3260,39 @@ const Player = {
   /* ---------- 歌词 ---------- */
   async loadLyric(song){
     this.lyric = { nid: song ? String(song.nid || '') : '', lines: [], idx: -1 };
-    if (!song || !song.nid || song.source !== 'netease' || !NCM.api()) { this.paintLyric(true); return; }
+    if (!song || !song.nid) { this.paintLyric(true); return; }
     const nid = String(song.nid);
-    try {
-      const d = await NCM.req('lyric', { id: nid });
-      if (this.currentNid !== song.nid) return;
-      const raw = (d && d.lrc && d.lrc.lyric) || '';
-      this.lyric.lines = parseLrc(raw);
-    } catch (e) {
-      this.lyric.lines = [];
+    const box = $('#ncmLyric');
+    if (box && !this.lyric.lines.length) box.innerHTML = '<div class="empty">歌词加载中…</div>';
+
+    let raw = '';
+    if (NCM.api()){
+      try {
+        const d = await NCM.req('lyric', { id: nid });
+        raw = (d && d.lrc && d.lrc.lyric) || '';
+      } catch (e) {}
     }
+    if (!raw){
+      // 没后端时直接走公开歌词镜像（支持跨域）
+      const mirrors = [
+        'https://api.injahow.cn/meting/?type=lrc&id=' + encodeURIComponent(nid),
+        'https://api.qijieya.cn/meting/?type=lrc&id=' + encodeURIComponent(nid)
+      ];
+      for (const url of mirrors){
+        try {
+          const r = await fetch(url, { cache: 'no-store' });
+          const txt = await r.text();
+          if (!txt) continue;
+          if (txt.indexOf('[') > -1){ raw = txt; break; }
+          try {
+            const j = JSON.parse(txt);
+            if (j && j.lyric){ raw = j.lyric; break; }
+          } catch (e) {}
+        } catch (e) {}
+      }
+    }
+    if (this.currentNid !== song.nid) return;
+    this.lyric.lines = parseLrc(raw);
     this.paintLyric(true);
   },
 
@@ -3300,9 +3341,9 @@ const Player = {
     } else if (roll < 0.5){
       if (!song || !song.nid) return;
       const nid = String(song.nid);
-      const liked = DB.liked().map(String);
-      if (liked.indexOf(nid) > -1) return;
-      liked.push(nid);
+      const liked = DB.liked();
+      if (liked.some(o => String(o.nid) === nid)) return;
+      liked.push({ nid: nid, name: song.name || '', artist: song.artist || '', cover: song.cover || '' });
       DB.setLiked(liked);
       renderMusic();
       pushPartnerMessage('《' + song.name + '》我收藏了，下次还想听。');
@@ -3314,11 +3355,12 @@ const Player = {
       pushPartnerMessage('下一首听《' + list[idx].name + '》好吗？我先预约了。');
       toast('TA 预约了下一首', 1800);
     } else if (roll < 0.88){
-      if (!NCM.api()) return;
       const s = await NCM.randomStrangerSong();
       if (!s) return;
-      const liked = DB.liked().map(String);
-      if (liked.indexOf(String(s.nid)) === -1) liked.push(String(s.nid));
+      const liked = DB.liked();
+      if (!liked.some(o => String(o.nid) === String(s.nid))) {
+        liked.push({ nid: String(s.nid), name: s.name || '', artist: s.artist || '', cover: s.cover || '' });
+      }
       DB.setLiked(liked);
       pushPartnerMessage('我在网易云听到《' + s.name + '》，收藏起来了，是首你没听过的歌。');
     } else {
@@ -3722,13 +3764,23 @@ function renderMusic(){
         '<button class="btn ghost" id="btnEndTogether" style="width:auto;padding:9px 14px;font-size:13px;">结束</button>' +
       '</div>' : '';
 
-  const likedIds = DB.liked().map(String);
+  const likedIds = DB.liked().map(o => String(o.nid));
   const isLiked = !!(song && song.nid && likedIds.indexOf(String(song.nid)) > -1);
   const friends = DB.friends();
   const pf = (together && together.friendId) ? (friends.find(f => f.id === together.friendId) || getCurrentFriend()) : getCurrentFriend();
-  const modeLabel = Player.mode === 'heart' ? '心动模式' : Player.mode === 'roam' ? '随机漫游' : '顺序播放';
+  const modeLabel = Player.mode === 'heart' ? '心动模式' : Player.mode === 'roam' ? '随机漫游' : Player.mode === 'repeat' ? '单曲循环' : '顺序播放';
   const curIdx = Player.index >= 0 ? Player.index : 0;
   const bgStyle = song && song.cover ? "background-image:url('" + esc(song.cover) + "')" : 'background:#1b1b1f';
+
+  const likedSongs = DB.liked();
+  const likedRows = likedSongs.length ? likedSongs.map(o => {
+    const inList = list.findIndex(s => s.nid && String(s.nid) === String(o.nid));
+    return '<div class="song-item" data-like-nid="' + esc(String(o.nid)) + '">' +
+      '<div class="s-idx">' + (inList > -1 && inList === Player.index && Player.playing ? icon('wave', 14) : icon('heart', 14)) + '</div>' +
+      '<div class="s-cover">' + (o.cover ? '<img src="' + esc(o.cover) + '" alt="">' : '') + '</div>' +
+      '<div class="s-info"><div class="s-name">' + esc(o.name || '未知歌曲') + '</div><div class="s-artist">' + esc(o.artist || '') + '</div></div>' +
+    '</div>';
+  }).join('') : '<div style="text-align:center;font-size:13px;color:var(--text-tertiary);padding:22px 0;">还没有收藏的歌，点播放页右侧心形收藏</div>';
 
   scroll.innerHTML =
     '<div class="ncm-hero">' +
@@ -3753,21 +3805,31 @@ function renderMusic(){
           '<button class="ncm-ctl" id="btnNext">' + icon('next', 24) + '</button>' +
           '<button class="ncm-ctl" id="btnList">' + icon('list', 22) + '<span>播放列表</span></button>' +
         '</div>' +
+        '<div class="ncm-modes">' +
+          ['normal:顺序', 'repeat:循环', 'heart:心动', 'roam:漫游'].map(o => {
+            const kv = o.split(':');
+            return '<button data-mode="' + kv[0] + '" class="' + (Player.mode === kv[0] ? 'on' : '') + '">' + kv[1] + '</button>';
+          }).join('') +
+        '</div>' +
         '<div class="ncm-vol">' + icon('volume', 16) + '<input type="range" id="volBar" min="0" max="1" step="0.01" value="' + Player.volume + '"></div>' +
+        (together && together.status === 'active' ?
         '<div class="ncm-together">' +
           avatarHTML(pf ? pf.avatar : null, pf ? pf.name : 'TA', 30) +
           '<div style="flex:1;min-width:0;">' +
             '<div class="tt">' + icon('wave', 14) + '<span>和你一起听</span></div>' +
             '<div class="ts" id="ncmPartnerText">' + esc(statusText) + '</div>' +
           '</div>' +
-          (together && together.status === 'active' ? '<button class="btn ghost" id="btnEndTogether" style="width:auto;padding:7px 12px;font-size:12px;">结束</button>' : '') +
-        '</div>' +
+          '<button class="btn ghost" id="btnEndTogether" style="width:auto;padding:7px 12px;font-size:12px;">结束</button>' +
+        '</div>' : '') +
       '</div>' +
     '</div>' +
-    NCM.cardHTML() +
     '<div class="card" id="songCard">' +
-      '<div style="font-size:14px;font-weight:600;margin-bottom:12px;">播放列表' + (together && together.status === 'active' ? ' · TA 也在听' : '') + '</div>' +
-      '<div class="song-list">' + songRows + '</div>' +
+      '<div class="ncm-tabs">' +
+        '<button class="ncm-tab on" data-tab="list">播放列表 ' + list.length + '</button>' +
+        '<button class="ncm-tab" data-tab="like">我喜欢 ' + likedSongs.length + '</button>' +
+      '</div>' +
+      '<div id="songListPane"><div class="song-list">' + songRows + '</div></div>' +
+      '<div id="songLikePane" style="display:none;"><div class="song-list">' + likedRows + '</div></div>' +
       '<div style="display:flex;justify-content:center;gap:12px;margin-top:16px;">' +
         '<button class="btn ghost" id="btnImportNetease" style="width:auto;padding:8px 16px;font-size:13px;border-radius:10px;display:flex;align-items:center;gap:6px;">' + icon('link', 16) + ' 导入歌单</button>' +
         '<button class="btn ghost" id="btnUploadAudio" style="width:auto;padding:8px 16px;font-size:13px;border-radius:10px;display:flex;align-items:center;gap:6px;">' + icon('upload', 16) + ' 上传音频</button>' +
@@ -3784,9 +3846,34 @@ function renderMusic(){
   const likeBtn = $('#btnLike');
   if (likeBtn) likeBtn.addEventListener('click', () => Player.toggleLike());
 
-  const modeBtn = $('#btnMode');
-  if (modeBtn) modeBtn.addEventListener('click', () => {
-    Player.setMode(Player.mode === 'normal' ? 'heart' : Player.mode === 'heart' ? 'roam' : 'normal');
+  $$('#musicScroll .ncm-modes button').forEach(btn => {
+    btn.addEventListener('click', () => Player.setMode(btn.dataset.mode));
+  });
+
+  $$('#musicScroll .ncm-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const isList = btn.dataset.tab === 'list';
+      $$('#musicScroll .ncm-tab').forEach(b => b.classList.toggle('on', b === btn));
+      const lp = $('#songListPane'), pk = $('#songLikePane');
+      if (lp) lp.style.display = isList ? '' : 'none';
+      if (pk) pk.style.display = isList ? 'none' : '';
+    });
+  });
+
+  $$('#musicScroll [data-like-nid]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const nid = el.dataset.likeNid;
+      const list2 = DB.playlist();
+      let idx = list2.findIndex(s => s.nid && String(s.nid) === String(nid));
+      if (idx < 0){
+        const like = DB.liked().find(o => String(o.nid) === String(nid));
+        if (!like) return;
+        list2.push({ name: like.name || '未知歌曲', artist: like.artist || '', cover: like.cover || '', nid: like.nid, source: 'netease' });
+        DB.setPlaylist(list2);
+        idx = list2.length - 1;
+      }
+      await Player.load(idx, true);
+    });
   });
 
   const listBtn = $('#btnList');
@@ -3848,7 +3935,6 @@ function renderMusic(){
 
   const btnImport = $('#btnImportNetease'); if (btnImport) btnImport.addEventListener('click', openNeteaseImport);
   const btnUpload = $('#btnUploadAudio'); if (btnUpload) btnUpload.addEventListener('click', openLocalUpload);
-  NCM.bind();
 
   if (together && together.status === 'active'){
     if (state.togetherTimer) clearInterval(state.togetherTimer);
@@ -5549,7 +5635,7 @@ function init(){
 
   // 后台保活：隐藏前托付任务，回到前台收回并回填
   BG.init();
-  NCM.init();
+
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) BG.handleHidden();
     else BG.handleVisible();
