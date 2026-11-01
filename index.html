@@ -1700,11 +1700,40 @@ function bindMessageEvents(){
   });
 }
 
+let chatPinTimers = [];
+function chatAtBottom(el, tol){
+  return el.scrollHeight - el.scrollTop - el.clientHeight < (tol || 60);
+}
 function scrollToBottom(){
   const el = $('#chatList');
   if (!el) return;
-  requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+  const pin = () => { el.scrollTop = el.scrollHeight; };
+  chatPinTimers.forEach(clearTimeout);
+  chatPinTimers = [];
+  // 同步 + 下一帧各贴一次，兜住刚插入的节点重新布局
+  pin();
+  requestAnimationFrame(pin);
+  // 图片（表情包/聊天图片）是异步解码的，撑高后再补贴几次
+  [60, 200, 500].forEach(t => chatPinTimers.push(setTimeout(() => {
+    if (chatAtBottom(el, 600)) pin();
+  }, t)));
+  $$('#chatList img').forEach(img => {
+    if (!img.complete){
+      img.addEventListener('load', () => {
+        if (chatAtBottom(el, 400)) pin();
+      }, { once: true });
+    }
+  });
 }
+// 键盘收起 / 转屏时视口变高，保持原本贴底的位置
+(function(){
+  const el = $('#chatList');
+  let stick = true;
+  el.addEventListener('scroll', () => { stick = chatAtBottom(el, 90); });
+  const repin = () => { if (stick) el.scrollTop = el.scrollHeight; };
+  window.addEventListener('resize', repin);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', repin);
+})();
 
 function showTypingIndicator(){
   const list = $('#chatList');
