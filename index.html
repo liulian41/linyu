@@ -12,7 +12,8 @@
 <script>
 /* 版本自检：GitHub Pages 的 HTML 会缓存 10 分钟，旧页面在这里发现线上版本更新后自动带参数重载 */
 (function(){
-  var BUILD = '20261103d';
+  var BUILD = '20261103e';
+  window.CX_BUILD = BUILD;
   try{
     fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function(r){ return r.json(); })
@@ -5938,6 +5939,7 @@ function openAbout(){
       '<div style="font-size:13.5px;line-height:1.75;color:var(--text-secondary);">' +
         '<p style="margin:0 0 12px;">传讯 3.5：修复歌手未知问题，新增心愿单中心，支持双向心愿互动与许愿实现。</p>' +
         '<p style="margin:0 0 12px;">所有数据仅保存在本机浏览器。</p>' +
+        '<p style="margin:0 0 12px;font-size:11px;color:var(--text-tertiary);">当前版本：' + esc(window.CX_BUILD || '未知') + '</p>' +
       '</div>',
     actions: [{ text: '关闭', primary: true }]
   });
