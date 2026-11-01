@@ -12,7 +12,7 @@
 <script>
 /* 版本自检：GitHub Pages 的 HTML 会缓存 10 分钟，旧页面在这里发现线上版本更新后自动带参数重载 */
 (function(){
-  var BUILD = '20261102e';
+  var BUILD = '20261103a';
   try{
     fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function(r){ return r.json(); })
@@ -269,7 +269,13 @@ body.no-anim .sticker-msg{animation:none;}
   color:var(--text-secondary);background:var(--fill-2);flex-shrink:0;transition:transform .18s;}
 .quote-preview .qp-close:active{transform:scale(.86);}
 
-.composer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px;}
+.composer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px;position:relative;}
+.scroll-bottom-btn{position:absolute;right:14px;bottom:calc(100% + 10px);width:34px;height:34px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;background:var(--card-bg-solid);color:var(--text-secondary);
+  border:.5px solid var(--sep);box-shadow:0 4px 14px rgba(0,0,0,.14);z-index:18;
+  opacity:0;transform:scale(.82);pointer-events:none;transition:opacity .2s var(--ease),transform .2s var(--ease);}
+.scroll-bottom-btn.show{opacity:1;transform:scale(1);pointer-events:auto;}
+.scroll-bottom-btn:active{transform:scale(.9);}
 .composer .icon-btn.tool-btn{margin-bottom:4px;color:var(--text-secondary);transition:transform .3s var(--ease);}
 .composer .icon-btn.tool-btn.active{transform:rotate(45deg);color:var(--blue);}
 .composer textarea{flex:1;resize:none;border:none;outline:none;font-family:inherit;
@@ -670,6 +676,7 @@ body.nav-clear .composer{background:transparent !important;}
         <button class="qp-close" id="qpClose" title="取消引用"></button>
       </div>
       <div class="composer">
+        <button class="scroll-bottom-btn" id="btnScrollBottom" title="回到最新消息"></button>
         <button class="icon-btn tool-btn" id="btnInlineSticker" title="表情"></button>
         <button class="icon-btn tool-btn" id="btnInlineImage" title="图片"></button>
         <textarea id="msgInput" rows="1" placeholder="iMessage"></textarea>
@@ -802,6 +809,7 @@ const ICONS = {
   chevronRight:'<path d="M9 5l7 7-7 7"/>',
   chevronLeft:'<path d="M15 5l-7 7 7 7"/>',
   arrowUp:'<path d="M12 19V5M6 11l6-6 6 6"/>',
+  arrowDown:'<path d="M12 5v14M6 13l6 6 6-6"/>',
   play:'<path d="M8 5.2v13.6L19 12z" fill="currentColor" stroke="none"/>',
   pause:'<path d="M8 5v14M16 5v14" stroke-width="2.4"/>',
   prev:'<path d="M18 6.5v11L10 12z" fill="currentColor" stroke="none"/><path d="M6.5 5.5v13"/>',
@@ -1738,6 +1746,12 @@ let chatPinTimers = [];
 function chatAtBottom(el, tol){
   return el.scrollHeight - el.scrollTop - el.clientHeight < (tol || 60);
 }
+function updateScrollBtn(){
+  const el = $('#chatList');
+  const btn = $('#btnScrollBottom');
+  if (!el || !btn) return;
+  btn.classList.toggle('show', !chatAtBottom(el, 90));
+}
 function scrollToBottom(){
   const el = $('#chatList');
   if (!el) return;
@@ -1750,23 +1764,33 @@ function scrollToBottom(){
   // 图片（表情包/聊天图片）是异步解码的，撑高后再补贴几次
   [60, 200, 500].forEach(t => chatPinTimers.push(setTimeout(() => {
     if (chatAtBottom(el, 600)) pin();
+    updateScrollBtn();
   }, t)));
   $$('#chatList img').forEach(img => {
     if (!img.complete){
       img.addEventListener('load', () => {
         if (chatAtBottom(el, 400)) pin();
+        updateScrollBtn();
       }, { once: true });
     }
   });
+  requestAnimationFrame(updateScrollBtn);
 }
 // 键盘收起 / 转屏时视口变高，保持原本贴底的位置
 (function(){
   const el = $('#chatList');
   let stick = true;
-  el.addEventListener('scroll', () => { stick = chatAtBottom(el, 90); });
-  const repin = () => { if (stick) el.scrollTop = el.scrollHeight; };
+  const onScroll = () => { stick = chatAtBottom(el, 90); updateScrollBtn(); };
+  const repin = () => { if (stick) el.scrollTop = el.scrollHeight; updateScrollBtn(); };
+  el.addEventListener('scroll', onScroll);
   window.addEventListener('resize', repin);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', repin);
+  const b = $('#btnScrollBottom');
+  if (b){
+    b.innerHTML = icon('arrowDown', 18);
+    b.addEventListener('click', () => { scrollToBottom(); });
+  }
+  updateScrollBtn();
 })();
 
 function showTypingIndicator(){
@@ -5351,7 +5375,7 @@ function openCardLibrary(){
       '<button class="btn ghost" id="tabStkBtn" style="flex:1;">表情包</button></div>' +
     '<div id="cardLibBody">' + cardLibHTML(groups) + '</div>' +
     '<div id="stickerLibBody" style="display:none;">' + stickerLibHTML(stickers) + '</div>';
-  const m = openModal({ title: '内容管理', bodyHTML: body, actions: [{ text: '关闭', primary: true }], fullscreen: true });
+  const m = openModal({ title: '内容管理', bodyHTML: body, fullscreen: true });
   const tabGrp = m.mask.querySelector('#tabGrpBtn');
   const tabStk = m.mask.querySelector('#tabStkBtn');
   const bodyGrp = m.mask.querySelector('#cardLibBody');
