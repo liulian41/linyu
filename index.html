@@ -223,7 +223,7 @@ body.no-anim .sticker-msg{animation:none;}
 .invite-accept-btn{background:var(--blue);color:#fff;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;}
 
 #typingRow{display:flex;justify-content:flex-start;padding:4px 0;margin-top:2px;}
-#typingRow .typing-bubble{background:var(--bubble-other-solid);
+#typingRow .typing-bubble{
   backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
   border-radius:20px;border-bottom-left-radius:5px;padding:13px 16px;display:flex;gap:5px;align-items:center;
   animation:bubbleIn .3s var(--ease);}
@@ -608,9 +608,9 @@ body.no-anim .sticker-msg{animation:none;}
 .img-msg{max-width:62vw;max-height:280px;border-radius:14px;display:block;object-fit:cover;
   animation:bubbleIn .34s var(--ease);background:var(--fill-1);cursor:pointer;}
 body.no-anim .img-msg{animation:none;}
-body.nav-clear .nav{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;
-  border-bottom-color:transparent;}
-body.nav-clear .composer{background:transparent;}
+body.nav-clear .nav{background:transparent !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;
+  border-bottom-color:transparent !important;}
+body.nav-clear .composer{background:transparent !important;}
 #btnInlineSticker,#btnInlineImage{color:var(--text-secondary);}
 </style>
 </head>
@@ -656,10 +656,6 @@ body.nav-clear .composer{background:transparent;}
           <button class="tool-item" id="btnToolRedPacket">
             <div class="ti-icon" id="icoRedPacket"></div>
             <span>红包</span>
-          </button>
-          <button class="tool-item" id="btnToolSticker">
-            <div class="ti-icon" id="icoSticker"></div>
-            <span>表情</span>
           </button>
           <button class="tool-item" id="btnToolShareMusic">
             <div class="ti-icon" id="icoShareMusic"></div>
@@ -1049,19 +1045,24 @@ function applyNavClear(){
 }
 async function applyChatBg(){
   const list = $('#chatList');
-  if (!list) return;
+  const page = $('#page-chat');
+  if (!list || !page) return;
   if (_chatBgUrl){ try { URL.revokeObjectURL(_chatBgUrl); } catch (e) {} _chatBgUrl = null; }
-  list.style.backgroundImage = '';
-  list.style.backgroundSize = '';
-  list.style.backgroundPosition = '';
+  [list, page].forEach(el => {
+    el.style.backgroundImage = '';
+    el.style.backgroundSize = '';
+    el.style.backgroundPosition = '';
+  });
   if (!DB.settings().chatBg) return;
   try {
     const blob = await getAudio('chat_bg');
     if (!blob) return;
     _chatBgUrl = URL.createObjectURL(blob);
-    list.style.backgroundImage = 'url("' + _chatBgUrl + '")';
-    list.style.backgroundSize = 'cover';
-    list.style.backgroundPosition = 'center';
+    const url = 'url("' + _chatBgUrl + '")';
+    // 整页铺底，这样顶部栏透明后也能看到背景图
+    page.style.backgroundImage = url;
+    page.style.backgroundSize = 'cover';
+    page.style.backgroundPosition = 'center';
   } catch (e) {}
 }
 
@@ -1608,7 +1609,7 @@ function showTypingIndicator(){
   if (!list || $('#typingRow')) return;
   const row = document.createElement('div');
   row.id = 'typingRow';
-  row.innerHTML = '<div class="typing-bubble"><i></i><i></i><i></i></div>';
+  row.innerHTML = '<div class="bubble other typing-bubble"><i></i><i></i><i></i></div>';
   list.appendChild(row);
   scrollToBottom();
 }
@@ -5914,7 +5915,6 @@ function bindGlobal(){
   });
 
   $('#icoRedPacket').innerHTML = icon('gift', 28);
-  $('#icoSticker').innerHTML = icon('smile', 28);
   $('#icoShareMusic').innerHTML = icon('music', 28);
   $('#btnInlineSticker').innerHTML = icon('smile', 22);
   $('#btnInlineImage').innerHTML = icon('image', 22);
@@ -5936,14 +5936,6 @@ function bindGlobal(){
     $('#toolPanel').classList.remove('show');
     $('#btnToggleTool').classList.remove('active');
     openSendRedPacketModal();
-  });
-
-  $('#btnToolSticker').addEventListener('click', () => {
-    $('#toolPanel').classList.remove('show');
-    $('#stickerPanel').classList.add('show');
-    $('#btnToggleTool').classList.add('active');
-    renderStickerPanel();
-    setTimeout(scrollToBottom, 300);
   });
 
   $('#btnToolShareMusic').addEventListener('click', () => {
