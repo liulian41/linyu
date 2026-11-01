@@ -3475,9 +3475,30 @@ const NCM = {
     const qs = new URLSearchParams(Object.assign({ timestamp: Date.now() }, params || {})).toString();
     const ck = this.cookie();
     const url = api + '/ncm/' + fn + '?' + qs + (ck ? '&cookie=' + encodeURIComponent(ck) : '');
-    const res = await fetchWithTimeout(url, 15000);
-    if (!res.ok) throw new Error('后端返回 ' + res.status);
+    let res;
+    try {
+      res = await fetchWithTimeout(url, 30000);
+    } catch (e) {
+      throw new Error('连不上后端 ' + api + this.apiHint());
+    }
+    if (!res.ok) throw new Error('后端返回 ' + res.status + this.apiHint());
     return await res.json();
+  },
+
+  apiHint(){
+    if (this.api().startsWith('http://') && location.protocol === 'https:')
+      return '（https 页面无法访问 http 后端，请用 https 地址）';
+    return '（后端可能正在休眠或未部署，可稍后重试）';
+  },
+
+  async ping(){
+    try {
+      const r = await fetchWithTimeout(this.api() + '/health', 30000);
+      const j = await r.json();
+      return { ok: !!j.ok, msg: j.service || 'ok' };
+    } catch (e) {
+      return { ok: false, msg: this.apiHint() };
+    }
   },
 
   async refresh(){
@@ -3513,7 +3534,8 @@ const NCM = {
       : '<div style="display:flex;gap:10px;margin-top:12px;">' +
           '<button id="btnNcmLogin" class="btn" style="flex:1;padding:9px;font-size:13px;border-radius:10px;">' + (api ? '扫码登录网易云' : '先配置后端地址') + '</button>' +
           (api ? '<button id="btnNcmConfig" class="btn ghost" style="width:auto;padding:9px 12px;font-size:13px;">设置</button>' : '') +
-        '</div>';
+        '</div>' +
+        (api ? '<button id="btnNcmCookie" class="btn ghost" style="width:100%;margin-top:8px;padding:9px;font-size:12px;border-radius:10px;">用网页版 Cookie 登录</button>' : '');
 
     return '<div class="card" style="padding:14px 16px;">' +
       '<div style="display:flex;align-items:center;gap:10px;">' + avatar +
@@ -3538,6 +3560,8 @@ const NCM = {
     });
     const imp = $('#btnNcmImport');
     if (imp) imp.addEventListener('click', () => this.openMyPlaylists());
+    const ckBtn = $('#btnNcmCookie');
+    if (ckBtn) ckBtn.addEventListener('click', () => this.openCookieLogin());
     const out = $('#btnNcmLogout');
     if (out) out.addEventListener('click', () => {
       this.setCookie('');
@@ -3566,7 +3590,43 @@ const NCM = {
             NCM.state.profile = null;
             if (v && NCM.cookie()) { try { await NCM.refresh(); } catch (e) {} }
             renderMusic();
-            toast(v ? '后端地址已保存' : '已清除后端地址');
+            if (!v){ toast('已清除后端地址'); return false; }
+            toast('已保存，正在测试连接…');
+            const r = await NCM.ping();
+            toast(r.ok ? '后端连接正常' : '后端连不上' + r.msg);
+            return false;
+          } }
+      ]
+    });
+  },
+
+  openCookieLogin(){
+    const body = '<div class="field"><label>粘贴网页版 Cookie</label>' +
+      '<textarea id="ncmCookieInput" rows="5" placeholder="MUSIC_U=xxx; __csrf=xxx; ..." style="width:100%;font-size:12px;"></textarea>' +
+      '<div class="hint">电脑打开 music.163.com 并登录 → F12 → Network → 点任意请求 → 复制 Request Headers 里的 Cookie 整段。至少要包含 MUSIC_U。</div>' +
+    '</div>';
+    openModal({
+      title: '网页版 Cookie 登录',
+      bodyHTML: body,
+      actions: [
+        { text: '取消' },
+        { text: '登录', primary: true, onClick: async (mask, close) => {
+            const raw = (mask.querySelector('#ncmCookieInput').value || '').trim();
+            const pairs = raw.split(';').map(s => s.trim()).filter(Boolean)
+              .filter(p => /^(MUSIC_U|__csrf|NMTID|os|appver|channel)=/.test(p));
+            if (!pairs.some(p => p.indexOf('MUSIC_U=') === 0)){ toast('Cookie 里没有 MUSIC_U，请复制完整 Cookie'); return false; }
+            const btn = mask.querySelector('.modal-actions button.primary');
+            if (btn){ btn.textContent = '验证中…'; btn.disabled = true; }
+            this.setCookie(pairs.join('; '));
+            try {
+              const prof = await this.refresh();
+              if (!prof) throw new Error('Cookie 已失效');
+              close(); renderMusic();
+              toast('网易云登录成功' + (this.vipLabel() ? ' · ' + this.vipLabel() : ''));
+            } catch (e) {
+              if (btn){ btn.textContent = '登录'; btn.disabled = false; }
+              toast('登录失败：' + (e.message || '接口异常'));
+            }
             return false;
           } }
       ]
@@ -3752,7 +3812,7 @@ function renderMusic(){
     ? list.map((s, i) =>
         '<div class="song-item ' + (i === Player.index ? 'playing' : '') + '" data-idx="' + i + '">' +
           '<div class="s-idx">' + (i + 1) + '</div>' +
-          '<div class="s-cover">' + (songCover(s) ? '<img src="' + esc(songCover(s)) + '" alt="">' : icon('music', 18)) + '</div>' +
+          '<div class="s-cover">' + (songCover(s) ? '<img src="' + esc(songCover(s)) + '" alt="" onerror="this.style.display=\'none\'">' : icon('music', 18)) + '</div>' +
           '<div class="s-info">' +
             '<div class="s-name">' + esc(s.name) + '</div>' +
             '<div class="s-artist">' + esc(s.artist || '未知歌手') + '</div>' +
@@ -3780,14 +3840,14 @@ function renderMusic(){
   const pf = (together && together.friendId) ? (friends.find(f => f.id === together.friendId) || getCurrentFriend()) : getCurrentFriend();
   const modeLabel = Player.mode === 'heart' ? '心动模式' : Player.mode === 'roam' ? '随机漫游' : Player.mode === 'repeat' ? '单曲循环' : '顺序播放';
   const curIdx = Player.index >= 0 ? Player.index : 0;
-  const bgStyle = song ? "background-image:url('" + esc(songCover(song) || '') + "')" : 'background:#1b1b1f';
+  const bgStyle = (song && songCover(song)) ? "background-image:url('" + esc(songCover(song)) + "')" : 'background:#1b1b1f';
 
   const likedSongs = DB.liked();
   const likedRows = likedSongs.length ? likedSongs.map(o => {
     const inList = list.findIndex(s => s.nid && String(s.nid) === String(o.nid));
     return '<div class="song-item" data-like-nid="' + esc(String(o.nid)) + '">' +
       '<div class="s-idx">' + (inList > -1 && inList === Player.index && Player.playing ? icon('wave', 14) : icon('heart', 14)) + '</div>' +
-      '<div class="s-cover">' + (songCover(o) ? '<img src="' + esc(songCover(o)) + '" alt="">' : '') + '</div>' +
+      '<div class="s-cover">' + (songCover(o) ? '<img src="' + esc(songCover(o)) + '" alt="" onerror="this.style.display=\'none\'">' : '') + '</div>' +
       '<div class="s-info"><div class="s-name">' + esc(o.name || '未知歌曲') + '</div><div class="s-artist">' + esc(o.artist || '') + '</div></div>' +
     '</div>';
   }).join('') : '<div style="text-align:center;font-size:13px;color:var(--text-tertiary);padding:22px 0;">还没有收藏的歌，点播放页右侧心形收藏</div>';
@@ -3976,14 +4036,13 @@ function fetchWithTimeout(url, ms){
   });
 }
 
-/* 封面：优先用导入时保存的 pic，缺失时用 meting 的封面接口（302 到网易云图片） */
-function neteasePic(nid){
-  return 'https://api.injahow.cn/meting/?type=pic&id=' + encodeURIComponent(String(nid));
+/* 封面：只认能真正出图的 pic；i-meto 节点的 pic 会返回 401，视为无效 */
+function badCover(url){
+  return !!url && url.indexOf('api.i-meto.com') > -1;
 }
 function songCover(s){
   if (!s) return '';
-  if (s.cover) return s.cover;
-  return s.nid ? neteasePic(s.nid) : '';
+  return (s.cover && !badCover(s.cover)) ? s.cover : '';
 }
 
 async function fetchNeteasePlaylist(link){
@@ -4050,15 +4109,29 @@ function openNeteaseImport(){
           try{
             const songs = await fetchNeteasePlaylist(link);
             const list = DB.playlist();
-            const exist = new Set(list.map(s => s.id));
-            let added = 0, skipped = 0;
+            const byId = new Map(list.map(s => [s.id, s]));
+            const byNid = new Map(list.filter(s => s.nid).map(s => ['n_' + s.nid, s]));
+            let added = 0, skipped = 0, filled = 0;
             songs.forEach(s => {
-              if (exist.has(s.id)) { skipped++; return; }
-              exist.add(s.id); list.push(s); added++;
+              const hit = byId.get(s.id) || (s.nid ? byNid.get('n_' + s.nid) : null);
+              if (hit){
+                // 已存在：顺手补全旧数据缺失的封面/歌手
+                let changed = false;
+                if ((!hit.cover || badCover(hit.cover)) && s.cover && !badCover(s.cover)){ hit.cover = s.cover; changed = true; }
+                if (!hit.artist && s.artist){ hit.artist = s.artist; changed = true; }
+                if ((!hit.name || hit.name === '未知歌曲') && s.name){ hit.name = s.name; changed = true; }
+                if (changed) filled++; else skipped++;
+                return;
+              }
+              byId.set(s.id, s);
+              if (s.nid) byNid.set('n_' + s.nid, s);
+              list.push(s); added++;
             });
             DB.setPlaylist(list);
             close(); renderMusic();
-            toast('导入成功：新增 ' + added + ' 首' + (skipped ? '，跳过 ' + skipped + ' 首' : ''));
+            toast('导入完成：新增 ' + added + ' 首' +
+              (filled ? '，补全封面 ' + filled + ' 首' : '') +
+              (skipped ? '，已存在 ' + skipped + ' 首' : ''));
           }catch(err){
             if (btn){ btn.textContent = '导入'; btn.disabled = false; }
             toast('解析失败：' + (err.message || '接口异常'));
