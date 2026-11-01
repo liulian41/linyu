@@ -1,5 +1,5 @@
 /* sw.js —— 传讯后台保活 / 延时通知 Service Worker */
-const VERSION = 'cx-bg-v3';
+const VERSION = 'cx-bg-v4';
 const HOLD_CAP_MS = 5 * 60 * 1000; // 单个 message 事件最长保活约 5 分钟
 const MAX_FIRED = 30;
 
@@ -14,6 +14,22 @@ self.addEventListener('install', () => {
 
 self.addEventListener('activate', event => {
   event.waitUntil(self.clients.claim());
+});
+
+/* 页面导航走网络优先：避免 GitHub Pages 的 HTML 缓存让用户停留在旧版本。
+   离线时回退到本地 HTTP 缓存，保证没有网络也能打开。 */
+self.addEventListener('fetch', event => {
+  const req = event.request;
+  if (req.mode !== 'navigate') return;
+  event.respondWith((async () => {
+    try{
+      const url = new URL(req.url);
+      url.searchParams.set('_r', Date.now());
+      return await fetch(url.toString(), { cache: 'no-store' });
+    }catch(e){
+      return fetch(req, { cache: 'force-cache' });
+    }
+  })());
 });
 
 /* ============================================================
