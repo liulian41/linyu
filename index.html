@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#f2f2f7">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="传讯">
 <title>传讯</title>
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
@@ -884,11 +888,17 @@ const DB = {
   setMoments: v => S.set('moments', v),
   letters: () => S.get('letters', []),
   setLetters: v => S.set('letters', v),
-  settings: () => S.get('settings', { 
+  settings: () => {
+    const defaults = {
       anim: true, waitMin: 1, waitMax: 3,
       autoLetter: false, letterUseSticker: true, letterCardsCount: 2,
-      autoMoment: false, momentCardsCount: 2
-  }),
+      letterInterval: 3,
+      autoMoment: false, momentCardsCount: 2, momentInterval: 5,
+      bgKeepAlive: true, silentAudio: false
+    };
+    const cur = S.get('settings', {});
+    return Object.assign({}, defaults, cur && typeof cur === 'object' ? cur : {});
+  },
   setSettings: v => S.set('settings', v),
   theme: () => S.get('theme', 'light'),
   setTheme: v => S.set('theme', v),
@@ -1148,7 +1158,7 @@ function msgHTML(m, prevTs){
     const f = getCurrentFriend();
     const friendName = f ? f.name : '对方';
     const title = m.from === 'me' ? '你邀请' + friendName + '一起听' : friendName + '邀请你一起听';
-    const statusText = m.inviteStatus === 'accepted' ? '已接受' : m.inviteStatus === 'rejected' ? '已拒绝' : '等待接受';
+    const statusText = m.inviteStatus === 'accepted' ? '已接受' : m.inviteStatus === 'rejected' ? '已拒绝' : m.inviteStatus === 'ended' ? '已结束' : '等待接受';
     
     if (m.from === 'other' && m.inviteStatus === 'pending') {
         html += '<div class="invite-card">' +
@@ -1310,10 +1320,13 @@ function bindMessageEvents(){
        const m = msgs.find(x => x.id === mid);
        if (m && m.inviteStatus === 'pending') {
           m.inviteStatus = 'accepted';
+          // 同意后清掉其余待处理邀请，避免重复邀请卡片
+          msgs.forEach(x => {
+            if (x.type === 'invite' && x.inviteStatus === 'pending' && x.id !== mid) x.inviteStatus = 'ended';
+          });
           DB.setChat(f.id, msgs);
           DB.setTogether({ friendId: f.id, status: 'active', startedAt: Date.now(), messageId: mid });
-           if (typeof CXPatch !== 'undefined') CXPatch.onInviteAccepted(mid, f.id);
-           renderChat();
+          renderChat();
           switchTab('music');
           if (!Player.playing) Player.play();
           toast('已接受邀请，开始一起听');
@@ -1465,8 +1478,10 @@ function sendMessage(isSticker, stickerUrl){
       }
     }
 
-    // 对方邀请听歌（去重：CXPatch 管 TTL / 已有进行中邀请 / 免打扰）
-    if (typeof CXPatch !== 'undefined' ? CXPatch.shouldGenerateIncomingInvite(fid) : (Math.random() < 0.1)) {
+    // 对方邀请听歌：已在一起听或已有待处理邀请时，不再重复邀请
+    const tg = DB.together();
+    const hasPendingInvite = currentMsgs.some(x => x.type === 'invite' && x.inviteStatus === 'pending');
+    if (!hasPendingInvite && !(tg && (tg.status === 'active' || tg.status === 'waiting')) && Math.random() < 0.1) {
       appendMessage({
         id: uid(), from: 'other', type: 'invite', inviteStatus: 'pending', ts: Date.now()
       });
@@ -1930,6 +1945,16 @@ function openChatSettings(){
       '<button class="switch ' + (st.autoMoment ? 'on' : '') + '" id="swAutoMoment" style="pointer-events:auto;"></button>' +
     '</div>' +
     
+    '<div class="section-label" style="margin-top:16px;">自动化频率（最短间隔）</div>' +
+    '<div class="field" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-bottom:.5px solid var(--sep);padding-bottom:12px;">' +
+      '<span style="font-size:15px;">发信间隔（分钟）</span>' +
+      '<input class="num-input" id="letterInterval" type="number" min="1" max="720" value="' + esc(st.letterInterval || 3) + '">' +
+    '</div>' +
+    '<div class="field" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-bottom:.5px solid var(--sep);padding-bottom:12px;">' +
+      '<span style="font-size:15px;">朋友圈间隔（分钟）</span>' +
+      '<input class="num-input" id="momentInterval" type="number" min="1" max="720" value="' + esc(st.momentInterval || 5) + '">' +
+    '</div>' +
+
     '<div class="section-label" style="margin-top:16px;">内容管理</div>' +
     '<button class="row" id="swGotoCards" style="padding:10px 0;min-height:auto;border-bottom:none;">' +
       '<span class="r-label">分组文本库 / 表情包</span>' +
@@ -1943,6 +1968,8 @@ function openChatSettings(){
       const cur = DB.settings();
       cur.waitMin = Math.max(0, parseFloat(m.mask.querySelector('#waitMin').value) || 0);
       cur.waitMax = Math.max(0, parseFloat(m.mask.querySelector('#waitMax').value) || 0);
+      cur.letterInterval = Math.max(1, Math.min(720, parseInt(m.mask.querySelector('#letterInterval').value) || 3));
+      cur.momentInterval = Math.max(1, Math.min(720, parseInt(m.mask.querySelector('#momentInterval').value) || 5));
       DB.setSettings(cur);
       renderMe();
     } }],
@@ -2365,46 +2392,38 @@ function openAddProductModal() {
 
 // 系统随机请求代付/购买/许愿
 function autoSimulateShop() {
-  if (Math.random() > 0.3) return;
   const orders = DB.orders();
+  // 已有未处理的代付/心愿时不再重复发起，避免一直刷屏
+  const pending = orders.find(o => o.from === 'other' && o.status === 'pending' && (o.action === 'req_pay' || o.action === 'wish'));
+  if (pending) return;
+  if (Math.random() > 0.3) return;
   const last = orders[orders.length - 1];
-  if (last && Date.now() - last.ts < 60000) return;
+  if (last && Date.now() - last.ts < 3 * 60000) return;
   
   const products = DB.products();
   if (!products.length) return;
   const p = products[Math.floor(Math.random() * products.length)];
   const actionType = Math.random();
-  const action = actionType < 0.33 ? 'req_pay' : (actionType < 0.66 ? 'buy' : 'wish');
   
-  // 推送去重：wish / req_pay 同商品 5 分钟内只推一次（buy 放行）
-  if (typeof CXPatch !== 'undefined' && CXPatch.allowOrderPush &&
-      !CXPatch.allowOrderPush(action, p.name, p.price)) {
-    return;
-  }
-  
-  if (action === 'req_pay') {
+  if (actionType < 0.33) {
      orders.push({
-        id: uid(), from: 'other', action: 'req_pay', productName: p.name, price: p.price, ts: Date.now(), status: 'pending'
+       id: uid(), from: 'other', action: 'req_pay', productName: p.name, price: p.price, ts: Date.now(), status: 'pending'
      });
      toast('对方请求你代付一件商品');
-  } else if (action === 'buy') {
+  } else if (actionType < 0.66) {
      orders.push({
-        id: uid(), from: 'other', action: 'buy', productName: p.name, price: p.price, ts: Date.now(), status: 'done'
+       id: uid(), from: 'other', action: 'buy', productName: p.name, price: p.price, ts: Date.now(), status: 'done'
      });
      if (Math.random() > 0.3) {
         appendMessage({ id: uid(), from: 'other', type: 'gift', giftData: p, ts: Date.now() });
      }
   } else {
      orders.push({
-        id: uid(), from: 'other', action: 'wish', productName: p.name, price: p.price, ts: Date.now(), status: 'pending'
+       id: uid(), from: 'other', action: 'wish', productName: p.name, price: p.price, ts: Date.now(), status: 'pending'
      });
      toast('对方许下了一个心愿');
   }
   DB.setOrders(orders);
-  // 订单落定登记，写入去重历史
-  if (typeof CXPatch !== 'undefined' && CXPatch.settleOrder) {
-    CXPatch.settleOrder(action, p.name, p.price);
-  }
   if (state.tab === 'shop') renderShop();
 }
 
@@ -2521,19 +2540,19 @@ function updateLetterBadge() {
     }
 }
 
-function checkAutoLetter() {
+function checkAutoLetter(force) {
     const st = DB.settings();
-    if (!st.autoLetter) return;
-    
-    // 频率控制交给 CXPatch（间隔 + 每日上限 + 免打扰时段）
-    if (typeof CXPatch === 'undefined' || !CXPatch.allowAutoLetter()) return;
-    
+    if (!st.autoLetter) return false;
+
+    const interval = Math.max(1, Number(st.letterInterval) || 3) * 60000;
     const letters = DB.letters();
-    const lastLetter = letters[letters.length - 1];
-    if (lastLetter && Date.now() - lastLetter.ts < 60000) return;
+    const lastLetter = letters.reduce((a, b) => (a && a.ts > b.ts ? a : b), null);
+    // 频率（最短间隔）优先于随机概率；后台任务回填时也不抢跑
+    if (lastLetter && Date.now() - lastLetter.ts < interval) return false;
+    if (!force && Math.random() > 0.3) return false;
 
     const cards = getTextCards();
-    if (!cards.length) return;
+    if (!cards.length) return false;
 
     let content = [];
     let count = st.letterCardsCount || 1;
@@ -2565,9 +2584,9 @@ function checkAutoLetter() {
     if (letters.length > 50) letters.shift();
     
     DB.setLetters(letters);
-    if (typeof CXPatch !== 'undefined') CXPatch.noteLetterPosted();
     updateLetterBadge();
     if (document.getElementById('letterScreen').classList.contains('show')) renderLetterList();
+    return true;
 }
 
 function renderLetterList() {
@@ -2727,22 +2746,22 @@ function autoReplyLetter() {
     if (document.getElementById('letterScreen').classList.contains('show')) renderLetterList();
 }
 
-function checkAutoMoment() {
+function checkAutoMoment(force) {
     const st = DB.settings();
-    if (!st.autoMoment) return;
-    
-    // 频率控制交给 CXPatch（间隔 + 每日上限 + 免打扰时段）
-    if (typeof CXPatch === 'undefined' || !CXPatch.allowAutoMoment()) return;
-    
+    if (!st.autoMoment) return false;
+
+    const interval = Math.max(1, Number(st.momentInterval) || 5) * 60000;
     const moments = DB.moments();
     const lastMoment = moments[moments.length - 1];
-    if (lastMoment && Date.now() - lastMoment.ts < 5 * 60000) return;
+    // 频率（最短间隔）优先于随机概率；后台任务回填时也不抢跑
+    if (lastMoment && Date.now() - lastMoment.ts < interval) return false;
+    if (!force && Math.random() > 0.3) return false;
 
     const cards = getTextCards();
-    if (!cards.length) return;
+    if (!cards.length) return false;
 
     const f = getCurrentFriend();
-    if (!f) return;
+    if (!f) return false;
 
     let count = st.momentCardsCount || 1;
     let textArr = [];
@@ -2770,9 +2789,9 @@ function checkAutoMoment() {
         comments: []
     });
     DB.setMoments(moments);
-    if (typeof CXPatch !== 'undefined') CXPatch.noteMomentPosted();
     renderMoments();
     toast(f.name + ' 发布了新朋友圈');
+    return true;
 }
 
 /* ============================================================
@@ -3405,6 +3424,7 @@ function inviteToListen(){
       const fid = btn.dataset.fid;
       const msgId = uid();
       const msgs = DB.chat(fid);
+      msgs.forEach(x => { if (x.type === 'invite' && x.inviteStatus === 'pending') x.inviteStatus = 'ended'; });
       msgs.push({ id: msgId, from: 'me', type: 'invite', ts: Date.now(), inviteStatus: 'pending' });
       DB.setChat(fid, msgs);
       DB.setTogether({ friendId: fid, status: 'waiting', startedAt: Date.now(), messageId: msgId });
@@ -3418,6 +3438,9 @@ function inviteToListen(){
         const msgNow = msgsNow.find(x => x.id === msgId);
         if (msgNow) {
           msgNow.inviteStatus = accepted ? 'accepted' : 'rejected';
+          if (accepted) msgsNow.forEach(x => {
+            if (x.type === 'invite' && x.inviteStatus === 'pending' && x.id !== msgId) x.inviteStatus = 'ended';
+          });
           DB.setChat(fid, msgsNow);
         }
         if (accepted) {
@@ -3627,10 +3650,6 @@ function renderMe(){
       '<button class="row" id="rowLetterbox">' +
         '<span class="r-label" style="display:flex;align-items:center;gap:8px;">信箱' + (hasUnreadLetter ? '<span style="background:var(--danger);color:#fff;font-size:10px;padding:2px 6px;border-radius:10px;">新信件</span>' : '') + '</span>' +
         '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button>' +
-      '<button class="row" id="rowCxFrequency">' +
-        '<span class="r-label">自动化与后台保活</span>' +
-        '<span class="r-value">频率 / 通知</span>' +
-        '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button>' +
     '</div>' +
     '<div class="group-title">外观</div>' +
     '<div class="group"><button class="row" id="rowTheme">' +
@@ -3657,6 +3676,11 @@ function renderMe(){
           '<span style="font-size:12px;color:var(--text-secondary);margin-left:10px;">含表情包</span>' +
           '<span class="switch ' + (st.letterUseSticker ? 'on' : '') + '" id="swLetterStk"></span>' +
         '</div></div>' +
+      '<div class="row" style="flex-wrap:wrap;gap:10px;">' +
+        '<span class="r-label" style="flex:1 1 100%;font-size:15px;">发信频率（最短间隔·分钟）</span>' +
+        '<div style="display:flex;align-items:center;gap:8px;width:100%;">' +
+          '<input class="num-input" id="setLetterInterval" type="number" min="1" max="720" value="' + esc(st.letterInterval||3) + '">' +
+        '</div></div>' +
       '<div class="row" id="rowAutoMoment"><span class="r-label">对方自动发朋友圈</span>' +
         '<span class="switch ' + (st.autoMoment ? 'on' : '') + '"></span></div>' +
       '<div class="row" style="flex-wrap:wrap;gap:10px;">' +
@@ -3664,12 +3688,33 @@ function renderMe(){
         '<div style="display:flex;align-items:center;gap:8px;width:100%;">' +
           '<input class="num-input" id="setMomentCount" type="number" min="1" max="5" value="' + esc(st.momentCardsCount||2) + '">' +
         '</div></div>' +
+      '<div class="row" style="flex-wrap:wrap;gap:10px;">' +
+        '<span class="r-label" style="flex:1 1 100%;font-size:15px;">朋友圈频率（最短间隔·分钟）</span>' +
+        '<div style="display:flex;align-items:center;gap:8px;width:100%;">' +
+          '<input class="num-input" id="setMomentInterval" type="number" min="1" max="720" value="' + esc(st.momentInterval||5) + '">' +
+        '</div></div>' +
     '</div>' +
     '<div class="group-title">内容</div>' +
     '<div class="group"><button class="row" id="rowCards">' +
       '<span class="r-label">分组文本库 / 表情包</span>' +
       '<span class="r-value">' + cardCount + ' 条</span>' +
       '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button></div>' +
+    '<div class="group-title">后台与提醒</div>' +
+    '<div class="group">' +
+      '<button class="row" id="rowNotify"><span class="r-label">桌面通知</span>' +
+        '<span class="r-value" id="notifyState">' + esc(BG.notifyStatusText()) + '</span>' +
+        '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button>' +
+      '<button class="row" id="rowTestNotify"><span class="r-label">测试信息提醒</span>' +
+        '<span class="r-value">5 秒后发送</span>' +
+        '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button>' +
+      '<div class="row" id="rowBgKeep"><span class="r-label">后台保活</span>' +
+        '<span class="switch ' + (st.bgKeepAlive ? 'on' : '') + '"></span></div>' +
+      '<div class="row" id="rowSilentAudio"><span class="r-label">静音音频防冻结</span>' +
+        '<span class="switch ' + (st.silentAudio ? 'on' : '') + '"></span></div>' +
+      '<button class="row" id="rowInstall"><span class="r-label">添加到主屏幕</span>' +
+        '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button>' +
+      '<div class="row" style="min-height:auto;"><span style="flex:1;font-size:12px;line-height:1.6;color:var(--text-tertiary);white-space:normal;">' + esc(BG.hintText()) + '</span></div>' +
+    '</div>' +
     '<div class="group-title">数据</div>' +
     '<div class="group">' +
       '<button class="row" id="rowExport"><span class="r-label">导出本地数据</span>' +
@@ -3692,19 +3737,28 @@ function renderMe(){
   $('#rowImport').addEventListener('click', importData);
   $('#rowClearAll').addEventListener('click', clearAllData);
   $('#rowAbout').addEventListener('click', openAbout);
-$('#rowLetterbox').addEventListener('click', openLetterbox);
+  $('#rowLetterbox').addEventListener('click', openLetterbox);
 
-  // 自动化与后台保活 设置入口（Patch 层）
-  const cxFreq = $('#rowCxFrequency');
-  if (cxFreq) {
-    cxFreq.addEventListener('click', function () {
-      if (typeof CXPatch !== 'undefined' && CXPatch.openFrequencySettings) {
-        CXPatch.openFrequencySettings();
-      } else {
-        toast('扩展模块未加载');
-      }
-    });
-  }
+  // 后台与提醒
+  $('#rowNotify').addEventListener('click', async () => {
+    await BG.requestNotifyPermission();
+    renderMe();
+  });
+  $('#rowTestNotify').addEventListener('click', () => BG.sendTestNotification());
+  $('#rowBgKeep').addEventListener('click', async () => {
+    const cur = DB.settings();
+    cur.bgKeepAlive = !cur.bgKeepAlive;
+    DB.setSettings(cur);
+    $('#rowBgKeep').querySelector('.switch').classList.toggle('on', cur.bgKeepAlive);
+    if (cur.bgKeepAlive && BG.notifyStatus() !== 'granted') await BG.requestNotifyPermission();
+    renderMe();
+  });
+  $('#rowSilentAudio').addEventListener('click', async () => {
+    const on = !DB.settings().silentAudio;
+    const ok = await BG.toggleSilent(on);
+    $('#rowSilentAudio').querySelector('.switch').classList.toggle('on', !!(ok && on));
+  });
+  $('#rowInstall').addEventListener('click', openInstallGuide);
 
   const saveSettings = () => {
     const cur = DB.settings();
@@ -3712,16 +3766,22 @@ $('#rowLetterbox').addEventListener('click', openLetterbox);
     cur.waitMax = Math.max(0, parseFloat($('#setWaitMax').value) || 0);
     cur.letterCardsCount = Math.max(1, parseInt($('#setLetterCount').value) || 2);
     cur.momentCardsCount = Math.max(1, parseInt($('#setMomentCount').value) || 2);
+    cur.letterInterval = Math.max(1, Math.min(720, parseInt($('#setLetterInterval').value) || 3));
+    cur.momentInterval = Math.max(1, Math.min(720, parseInt($('#setMomentInterval').value) || 5));
     DB.setSettings(cur);
     $('#setWaitMin').value = cur.waitMin;
     $('#setWaitMax').value = cur.waitMax;
     $('#setLetterCount').value = cur.letterCardsCount;
     $('#setMomentCount').value = cur.momentCardsCount;
+    $('#setLetterInterval').value = cur.letterInterval;
+    $('#setMomentInterval').value = cur.momentInterval;
   };
   $('#setWaitMin').addEventListener('change', saveSettings);
   $('#setWaitMax').addEventListener('change', saveSettings);
   $('#setLetterCount').addEventListener('change', saveSettings);
   $('#setMomentCount').addEventListener('change', saveSettings);
+  $('#setLetterInterval').addEventListener('change', saveSettings);
+  $('#setMomentInterval').addEventListener('change', saveSettings);
 
   $('#rowAnim').addEventListener('click', () => {
     const cur = DB.settings();
@@ -4264,6 +4324,387 @@ function openAbout(){
   });
 }
 
+/* ============================================================
+   后台保活 / 系统通知
+   —— 页面隐藏前，把 5 分钟内的定时提醒 postMessage 交给 Service Worker
+   —— SW 用 event.waitUntil 保活，到点 showNotification 弹系统通知
+   —— 页面回到前台后用 RECLAIM 收回任务，并回填 SW 已触发的业务事件
+   ============================================================ */
+const BG = {
+  HOLD: 4.5 * 60 * 1000, // 交给 SW 的最大延时（SW 自身保活上限约 5 分钟）
+  supported: false,
+  ready: false,
+  failed: false,
+  reg: null,
+  local: new Map(),
+  autoIds: { letter: null, moment: null },
+  applied: new Set(),
+  installPrompt: null,
+  silentEl: null,
+  silentUrl: null,
+
+  init(){
+    try { this.applied = new Set(S.get('bg_applied', [])); } catch(e){ this.applied = new Set(); }
+    this.bindInstall();
+    if (DB.settings().silentAudio){
+      setTimeout(() => this.startSilent(true), 600);
+      // 自动播放被拦截时，等用户第一次触摸再尝试
+      document.addEventListener('pointerdown', () => this.startSilent(true), { once: true });
+    }
+
+    this.supported = ('serviceWorker' in navigator) && location.protocol !== 'file:';
+    if (!this.supported) return;
+
+    navigator.serviceWorker.addEventListener('message', e => this.onSWMessage(e));
+    navigator.serviceWorker.register('sw.js', { scope: './' })
+      .then(() => navigator.serviceWorker.ready)
+      .then(reg => {
+        this.reg = reg;
+        this.ready = true;
+        this.handleVisible();
+        if (state.tab === 'me') renderMe();
+      })
+      .catch(err => {
+        this.failed = true;
+        this.supported = false;
+        console.warn('[BG] Service Worker 注册失败', err);
+        if (state.tab === 'me') renderMe();
+      });
+  },
+
+  onSWMessage(ev){
+    const d = ev.data || {};
+    if (d.type === 'TASK_FIRED' && d.task){
+      this.applyTask(d.task);
+      this.call('ACK', { ids: [d.task.id] });
+    } else if (d.type === 'NOTIFICATION_CLICKED'){
+      this.onNotificationClick(d.data || {});
+    }
+  },
+
+  // 用 MessageChannel 给 SW 发消息并等待回复
+  call(type, data){
+    if (!this.supported || !this.ready || !this.reg || !this.reg.active) {
+      return Promise.resolve({ ok: false, error: 'no-sw' });
+    }
+    return new Promise(resolve => {
+      const ch = new MessageChannel();
+      const timer = setTimeout(() => {
+        try { ch.port1.close(); } catch(e){}
+        resolve({ ok: false, error: 'timeout' });
+      }, 2000);
+      ch.port1.onmessage = ev => { clearTimeout(timer); resolve(ev.data || {}); };
+      try {
+        this.reg.active.postMessage(Object.assign({ type }, data || {}), [ch.port2]);
+      } catch(e){
+        clearTimeout(timer);
+        resolve({ ok: false, error: String(e) });
+      }
+    });
+  },
+
+  // 统一调度：能在 SW 保活窗口内就交给 SW，否则退回主线程定时器
+  schedule(task){
+    if (!task || !task.id || !task.fireAt) return;
+    this.cancelLocal(task.id);
+    const delay = Math.max(0, task.fireAt - Date.now());
+    if (this.supported && this.ready && delay <= this.HOLD){
+      this.call('SCHEDULE', { task }).then(r => {
+        if (!r || !r.ok) this.scheduleLocal(task);
+      });
+    } else {
+      this.scheduleLocal(task);
+    }
+  },
+
+  scheduleLocal(task){
+    const timer = setTimeout(() => {
+      this.local.delete(task.id);
+      this.applyTask(task);
+      this.showLocalNotification(task);
+    }, Math.max(0, task.fireAt - Date.now()));
+    this.local.set(task.id, timer);
+  },
+
+  cancel(id){
+    if (!id) return;
+    this.cancelLocal(id);
+    if (this.ready) this.call('CANCEL', { id });
+  },
+
+  cancelLocal(id){
+    const t = this.local.get(id);
+    if (t) { clearTimeout(t); this.local.delete(id); }
+  },
+
+  // 页面隐藏：把临近到期的自动写信 / 朋友圈提醒托付给 SW
+  handleHidden(){
+    const st = DB.settings();
+    if (!st.bgKeepAlive) return;
+    if (!this.ready) return;
+    if (!this.canNotify()) return; // 没有通知权限时托付没有意义
+    this.scheduleAuto('letter');
+    this.scheduleAuto('moment');
+  },
+
+  // 页面回到前台：收回 SW 任务，回填已经触发的业务事件
+  async handleVisible(){
+    if (document.hidden) return;
+    if (this.silentEl && this.silentEl.paused && DB.settings().silentAudio) this.startSilent(true);
+    if (!this.ready || !this.reg) return;
+
+    const r = await this.call('RECLAIM', { includeFired: true });
+    if (!r || !r.ok) return;
+
+    const firedList = r.fired || [];
+    firedList.forEach(item => this.applyTask(item.task));
+    if (firedList.length) this.call('ACK', { ids: firedList.map(i => i.task.id) });
+
+    // 尚未到期的任务由主线程接管（页面可见时主线程定时器本来就是准的）
+    (r.tasks || []).forEach(task => {
+      if (task.fireAt <= Date.now()) this.applyTask(task);
+      else if (task.kind === 'test') this.scheduleLocal(task); // 测试提醒不丢
+    });
+  },
+
+  scheduleAuto(kind){
+    const st = DB.settings();
+    const now = Date.now();
+    const friend = getCurrentFriend();
+    if (!getTextCards().length) return; // 没有字卡时任务无法落地
+    let due = 0, title = '', body = '';
+
+    if (kind === 'letter'){
+      if (!st.autoLetter) return;
+      const interval = Math.max(1, Number(st.letterInterval) || 3) * 60000;
+      const last = DB.letters().reduce((m, l) => Math.max(m, l.ts), 0);
+      due = last ? last + interval : now + 15000;
+      title = '传讯 · 新来信';
+      body = (friend ? friend.name : 'Ta') + ' 给你写了一封信';
+    } else if (kind === 'moment'){
+      if (!st.autoMoment) return;
+      const interval = Math.max(1, Number(st.momentInterval) || 5) * 60000;
+      const last = DB.moments().reduce((m, x) => Math.max(m, x.ts), 0);
+      due = last ? last + interval : now + 15000;
+      title = '传讯 · 朋友圈';
+      body = (friend ? friend.name : 'Ta') + ' 发布了新动态';
+    }
+    if (!due) return;
+    if (due <= now) due = now + 2000;
+    if (due - now > this.HOLD) return; // 超出 SW 单次保活窗口，不硬塞
+
+    const prev = this.autoIds[kind];
+    if (prev) this.cancel(prev);
+    const id = 'bg_' + kind + '_' + now.toString(36) + Math.random().toString(36).slice(2, 6);
+    this.autoIds[kind] = id;
+    this.schedule({
+      id, fireAt: due, kind,
+      title, body,
+      tag: 'cx-' + kind,
+      url: location.href.split('#')[0],
+      payload: { friendId: friend ? friend.id : null }
+    });
+  },
+
+  // 按 task.id 去重后执行对应业务，避免 SW 和主线程重复回填
+  applyTask(task){
+    if (!task || !task.id) return;
+    if (this.applied.has(task.id)) return;
+    this.applied.add(task.id);
+    try {
+      const arr = Array.from(this.applied).slice(-100);
+      this.applied = new Set(arr);
+      S.set('bg_applied', arr);
+    } catch(e){}
+
+    const kind = task.kind || (task.payload && task.payload.kind) || '';
+    const st = DB.settings();
+    if (kind === 'letter' && st.autoLetter) checkAutoLetter(true);
+    else if (kind === 'moment' && st.autoMoment) checkAutoMoment(true);
+  },
+
+  canNotify(){
+    return ('Notification' in window) && Notification.permission === 'granted';
+  },
+
+  notifyStatus(){
+    if (!('Notification' in window)) return 'unsupported';
+    return Notification.permission;
+  },
+
+  notifyStatusText(){
+    if (!('Notification' in window)) return '浏览器不支持';
+    if (Notification.permission === 'granted') return '已开启';
+    if (Notification.permission === 'denied') return '已拒绝';
+    return '未开启';
+  },
+
+  async requestNotifyPermission(){
+    if (!('Notification' in window)) { toast('当前浏览器不支持桌面通知'); return false; }
+    if (Notification.permission === 'granted') { toast('通知已开启'); return true; }
+    if (Notification.permission === 'denied') { toast('通知已被拒绝，请到浏览器设置中允许'); return false; }
+    try {
+      const p = await Notification.requestPermission();
+      if (p === 'granted') { toast('通知已开启'); return true; }
+      toast('未开启通知，后台提醒将无法显示');
+    } catch(e){ toast('通知授权失败'); }
+    return false;
+  },
+
+  async sendTestNotification(){
+    if (!('Notification' in window)){ toast('当前浏览器不支持桌面通知'); return; }
+    if (Notification.permission !== 'granted'){
+      const ok = await this.requestNotifyPermission();
+      if (!ok) return;
+    }
+    const task = {
+      id: 'cx_test_' + Date.now().toString(36),
+      fireAt: Date.now() + 5000,
+      kind: 'test',
+      title: '传讯 · 测试提醒',
+      body: '如果你看到这条通知，说明后台提醒通道工作正常。',
+      tag: 'cx-test',
+      url: location.href.split('#')[0]
+    };
+    this.schedule(task);
+    toast(this.supported && this.ready
+      ? '已交给 Service Worker，5 秒后发送，可切到后台验证'
+      : '当前无法使用 Service Worker，5 秒后由本地定时器发送');
+  },
+
+  showLocalNotification(task){
+    if (!this.canNotify()) return;
+    try {
+      const n = new Notification(task.title || '传讯', {
+        body: task.body || '',
+        tag: task.tag || ('cx-' + task.id),
+        data: { kind: task.kind || null }
+      });
+      n.onclick = () => {
+        try { window.focus(); } catch(e){}
+        this.onNotificationClick({ kind: task.kind });
+      };
+    } catch(e){}
+  },
+
+  onNotificationClick(data){
+    const kind = data && data.kind;
+    this.handleVisible();
+    setTimeout(() => {
+      if (kind === 'letter'){ switchTab('me'); openLetterbox(); }
+      else if (kind === 'moment'){ switchTab('moments'); }
+    }, 400);
+  },
+
+  hintText(){
+    if (location.protocol === 'file:') return '当前以 file:// 打开，Service Worker 与系统通知不可用。请部署到 https 或 localhost 后再使用。';
+    if (!('serviceWorker' in navigator)) return '当前浏览器不支持 Service Worker，后台定时任务无法托付。';
+    if (!('Notification' in window)) return '当前浏览器不支持桌面通知，后台保活只能维持任务，无法弹出提醒。';
+    if (this.failed) return '未找到 sw.js 或注册失败：请把 sw.js 与页面放在同一目录，并通过 https 或 localhost 访问。';
+    if (!this.ready) return 'Service Worker 正在注册…';
+    return '页面进入后台后，5 分钟内的自动写信 / 朋友圈提醒会交给 Service Worker，到点由系统通知提醒；点击通知可回到应用。';
+  },
+
+  bindInstall(){
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      this.installPrompt = e;
+    });
+    window.addEventListener('appinstalled', () => {
+      this.installPrompt = null;
+      toast('已添加到主屏幕');
+    });
+  },
+
+  isStandalone(){
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  },
+
+  // 循环播放静音音频，尝试阻止后台被冻结（实验性）
+  async startSilent(quiet){
+    try {
+      if (!this.silentEl){
+        this.silentUrl = makeSilentWavUrl();
+        const el = new Audio(this.silentUrl);
+        el.loop = true;
+        el.preload = 'auto';
+        el.setAttribute('playsinline', '');
+        this.silentEl = el;
+      }
+      await this.silentEl.play();
+      if (!quiet) toast('静音音频已开启（实验性）');
+      return true;
+    } catch(e){
+      if (!quiet) toast('启动失败，请再点一次开关');
+      return false;
+    }
+  },
+
+  stopSilent(){
+    if (this.silentEl){
+      try { this.silentEl.pause(); } catch(e){}
+    }
+  },
+
+  async toggleSilent(on){
+    const st = DB.settings();
+    if (on){
+      const ok = await this.startSilent(false);
+      st.silentAudio = ok;
+      DB.setSettings(st);
+      return ok;
+    }
+    this.stopSilent();
+    st.silentAudio = false;
+    DB.setSettings(st);
+    toast('已关闭静音音频');
+    return true;
+  }
+};
+
+// 生成 2 秒静音 WAV（8kHz / 8bit / 单声道），避免依赖外部音频文件
+function makeSilentWavUrl(){
+  const sr = 8000, samples = sr * 2;
+  const buf = new ArrayBuffer(44 + samples);
+  const view = new DataView(buf);
+  const write = (offset, str) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+  write(0, 'RIFF'); view.setUint32(4, 36 + samples, true); write(8, 'WAVE');
+  write(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sr, true); view.setUint32(28, sr, true); view.setUint16(32, 1, true); view.setUint16(34, 8, true);
+  write(36, 'data'); view.setUint32(40, samples, true);
+  new Uint8Array(buf, 44, samples).fill(128);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+
+function openInstallGuide(){
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let steps;
+  if (BG.isStandalone()){
+    steps = '当前已从主屏幕启动，无需再次添加。';
+  } else if (isIOS){
+    steps = '① 用 Safari 打开本页\n② 点底部「分享」按钮\n③ 选择「添加到主屏幕」\n\n提示：iOS 16.4 起，从主屏幕启动后才能收到系统通知。';
+  } else if (/Android/i.test(ua)){
+    steps = '① 用 Chrome 打开本页\n② 打开右上角菜单\n③ 选择「安装应用」或「添加到主屏幕」';
+  } else {
+    steps = '在 Chrome / Edge 地址栏右侧点击「安装」图标，或打开菜单选择「安装传讯」。';
+  }
+  if (location.protocol === 'file:') steps += '\n\n当前是 file:// 打开，安装与通知都不可用，请先部署到 https 或 localhost。';
+
+  openModal({
+    title: '添加到主屏幕',
+    bodyHTML: '<div style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-secondary);">' + esc(steps) + '</div>',
+    actions: BG.installPrompt
+      ? [{ text: '取消' }, { text: '立即添加', primary: true, onClick: () => {
+          const p = BG.installPrompt;
+          BG.installPrompt = null;
+          if (p) p.prompt();
+        } }]
+      : [{ text: '知道了', primary: true }],
+    bottom: true
+  });
+}
+
 function bindGlobal(){
   $$('.tab-item').forEach(t => { t.addEventListener('click', () => switchTab(t.dataset.tab)); });
   $$('.tab-item [data-icon]').forEach(span => {
@@ -4403,7 +4844,18 @@ function init(){
   updateLetterBadge();
 
   setInterval(checkAutoLetter, 30000);
+  setInterval(checkAutoMoment, 30000);
   setInterval(autoSimulateShop, 45000);
+
+  // 后台保活：隐藏前托付任务，回到前台收回并回填
+  BG.init();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) BG.handleHidden();
+    else BG.handleVisible();
+  });
+  window.addEventListener('pagehide', () => {
+    if (document.hidden) BG.handleHidden();
+  });
 
   setTimeout(() => {
     const splash = $('#splash');
@@ -4424,16 +4876,5 @@ function init(){
 
 document.addEventListener('DOMContentLoaded', init);
 </script>
-
-<!-- ===== 传讯 Patch 层：后台保活 / 频率控制 / 邀请去重 / 订单推送去重 ===== -->
-<!-- 顺序不可颠倒：bg-bridge 提供 window.Bg，patch-features 依赖它 -->
-<link rel="manifest" href="./manifest.json">
-<meta name="theme-color" content="#000000">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="传讯">
-<link rel="apple-touch-icon" href="./v2/icon-192.png">
-<script src="./v2/bg-bridge.js"></script>
-<script src="./v2/patch-features.js"></script>
 </body>
 </html>
