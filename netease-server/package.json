@@ -1,0 +1,16 @@
+{
+  "name": "cx-netease-proxy",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "NeteaseCloudMusicApi": "^4.32.0"
+  }
+}

@@ -894,7 +894,8 @@ const DB = {
       autoLetter: false, letterUseSticker: true, letterCardsCount: 2,
       letterMinH: 1, letterMaxH: 3,
       autoMoment: false, momentCardsCount: 2, momentMinH: 1, momentMaxH: 3,
-      bgKeepAlive: true, silentAudio: false
+      bgKeepAlive: true, silentAudio: false,
+      ncmApi: ''
     };
     const cur = S.get('settings', {});
     return Object.assign({}, defaults, cur && typeof cur === 'object' ? cur : {});
@@ -3170,6 +3171,283 @@ function updateSeekUI(){
   if (tot) tot.textContent = d ? fmtDur(d) : '--:--';
 }
 
+/* ============================================================
+   网易云账号：扫码登录 / 我的歌单 / VIP 状态
+   依赖自建代理服务（netease-server），地址填在「设置」里
+   ============================================================ */
+const NCM = {
+  state: { profile: null, busy: false },
+
+  api(){
+    return String(DB.settings().ncmApi || '').trim().replace(/\/+$/, '');
+  },
+
+  cookie(){
+    return S.get('ncm_cookie', '') || '';
+  },
+
+  setCookie(c){
+    if (c) S.set('ncm_cookie', c); else S.del('ncm_cookie');
+  },
+
+  loggedIn(){
+    return !!this.cookie() && !!this.state.profile;
+  },
+
+  vipLabel(){
+    const p = this.state.profile;
+    if (!p) return '';
+    const t = Number(p.vipType || 0);
+    if (t > 0) return '黑胶VIP';
+    if (Array.isArray(p.vipRights) && p.vipRights.length) return '黑胶VIP';
+    return '';
+  },
+
+  async req(fn, params){
+    const api = this.api();
+    if (!api) throw new Error('未配置后端地址');
+    const qs = new URLSearchParams(Object.assign({ timestamp: Date.now() }, params || {})).toString();
+    const ck = this.cookie();
+    const url = api + '/ncm/' + fn + '?' + qs + (ck ? '&cookie=' + encodeURIComponent(ck) : '');
+    const res = await fetchWithTimeout(url, 15000);
+    if (!res.ok) throw new Error('后端返回 ' + res.status);
+    return await res.json();
+  },
+
+  async refresh(){
+    if (!this.cookie()) { this.state.profile = null; return null; }
+    try {
+      const d = await this.req('login_status');
+      this.state.profile = (d && d.profile) || null;
+    } catch (e) {
+      this.state.profile = null;
+      throw e;
+    }
+    return this.state.profile;
+  },
+
+  cardHTML(){
+    const api = this.api();
+    const p = this.state.profile;
+    const vip = this.vipLabel();
+    const host = api ? api.replace(/^https?:\/\//, '').replace(/\/ncm$/, '') : '';
+    const avatar = p && p.avatarUrl
+      ? '<img src="' + esc(String(p.avatarUrl).replace(/^http:\/\//, 'https://')) + '" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0;">'
+      : '<div style="width:38px;height:38px;border-radius:50%;background:var(--fill-1);display:flex;align-items:center;justify-content:center;color:var(--text-tertiary);flex-shrink:0;">' + icon('music', 18) + '</div>';
+    const vipTag = vip
+      ? '<span style="font-size:10px;color:#d11141;border:1px solid #ffb6c1;padding:1px 5px;border-radius:6px;margin-left:6px;">' + vip + '</span>'
+      : '';
+    const sub = !api ? '未配置后端地址，点「设置」填写'
+      : (p ? '已连接 · ' + esc(host) : '后端已配置 · 未登录');
+    const actions = p
+      ? '<div style="display:flex;gap:10px;margin-top:12px;">' +
+          '<button id="btnNcmImport" class="btn" style="flex:1;padding:9px;font-size:13px;border-radius:10px;">导入我的歌单</button>' +
+          '<button id="btnNcmConfig" class="btn ghost" style="width:auto;padding:9px 12px;font-size:13px;">设置</button>' +
+        '</div>'
+      : '<div style="display:flex;gap:10px;margin-top:12px;">' +
+          '<button id="btnNcmLogin" class="btn" style="flex:1;padding:9px;font-size:13px;border-radius:10px;">' + (api ? '扫码登录网易云' : '先配置后端地址') + '</button>' +
+          (api ? '<button id="btnNcmConfig" class="btn ghost" style="width:auto;padding:9px 12px;font-size:13px;">设置</button>' : '') +
+        '</div>';
+
+    return '<div class="card" style="padding:14px 16px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;">' + avatar +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+            esc(p ? p.nickname : '网易云账号') + vipTag +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--text-secondary);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + sub + '</div>' +
+        '</div>' +
+        (p ? '<button id="btnNcmLogout" class="btn ghost" style="width:auto;padding:7px 12px;font-size:12px;">退出</button>' : '') +
+      '</div>' + actions +
+    '</div>';
+  },
+
+  bind(){
+    const cfg = $('#btnNcmConfig');
+    if (cfg) cfg.addEventListener('click', () => this.openConfig());
+    const login = $('#btnNcmLogin');
+    if (login) login.addEventListener('click', () => {
+      if (!this.api()) { this.openConfig(); return; }
+      this.openQrLogin();
+    });
+    const imp = $('#btnNcmImport');
+    if (imp) imp.addEventListener('click', () => this.openMyPlaylists());
+    const out = $('#btnNcmLogout');
+    if (out) out.addEventListener('click', () => {
+      this.setCookie('');
+      this.state.profile = null;
+      renderMusic();
+      toast('已退出网易云');
+    });
+  },
+
+  openConfig(){
+    const body = '<div class="field"><label>代理服务地址</label>' +
+      '<input type="text" id="ncmApiInput" placeholder="http://192.168.1.5:3000" value="' + esc(this.api()) + '">' +
+      '<div class="hint">在电脑上运行 netease-server 后填写它的地址，手机和电脑需在同一网络；部署到公网则填公网地址。</div>' +
+    '</div>';
+    openModal({
+      title: '网易云后端地址',
+      bodyHTML: body,
+      actions: [
+        { text: '取消' },
+        { text: '保存', primary: true, onClick: async (mask, close) => {
+            const v = mask.querySelector('#ncmApiInput').value.trim().replace(/\/+$/, '');
+            const cur = DB.settings();
+            cur.ncmApi = v;
+            DB.setSettings(cur);
+            close();
+            NCM.state.profile = null;
+            if (v && NCM.cookie()) { try { await NCM.refresh(); } catch (e) {} }
+            renderMusic();
+            toast(v ? '后端地址已保存' : '已清除后端地址');
+            return false;
+          } }
+      ]
+    });
+  },
+
+  async openQrLogin(){
+    if (this.state.busy) return;
+    this.state.busy = true;
+    try {
+      const k = await this.req('login_qr_key');
+      const unikey = k && k.data && k.data.unikey;
+      if (!unikey) throw new Error('获取二维码 key 失败');
+      const c = await this.req('login_qr_create', { key: unikey, qrimg: 'true' });
+      const img = c && c.data && c.data.qrimg;
+      if (!img) throw new Error('生成二维码失败');
+
+      const m = openModal({
+        title: '扫码登录网易云',
+        bodyHTML: '<div style="text-align:center;">' +
+          '<img src="' + img + '" style="width:220px;height:220px;border-radius:12px;">' +
+          '<div id="ncmQrStatus" style="font-size:13px;color:var(--text-secondary);margin-top:10px;">请使用网易云音乐 App 扫码</div>' +
+        '</div>',
+        actions: [{ text: '取消' }]
+      });
+      const statusEl = m.mask.querySelector('#ncmQrStatus');
+      let stopped = false;
+      const timer = setInterval(async () => {
+        if (stopped) return;
+        if (!m.mask.isConnected) { stopped = true; clearInterval(timer); return; }
+        try {
+          const r = await this.req('login_qr_check', { key: unikey });
+          if (r.code === 802) {
+            stopped = true; clearInterval(timer);
+            statusEl.textContent = '二维码已过期，请重新打开';
+          } else if (r.code === 800 || r.code === 801) {
+            statusEl.textContent = r.code === 801 ? '已扫码，请在手机上确认' : '请使用网易云音乐 App 扫码';
+          } else if (r.code === 803) {
+            stopped = true; clearInterval(timer);
+            this.setCookie(r.cookie);
+            await this.refresh();
+            m.close();
+            renderMusic();
+            toast('网易云登录成功');
+          }
+        } catch (e) {
+          // 网络抖动时继续轮询
+        }
+      }, 2000);
+    } catch (e) {
+      toast('登录失败：' + (e.message || '接口异常'));
+    } finally {
+      this.state.busy = false;
+    }
+  },
+
+  async openMyPlaylists(){
+    try {
+      if (!this.state.profile) await this.refresh();
+      if (!this.state.profile) { toast('请先登录网易云'); return; }
+      const uid = this.state.profile.userId;
+      const d = await this.req('user_playlist', { uid: uid, limit: '1000', offset: '0' });
+      const arr = (d && d.playlist) || [];
+      if (!arr.length) { toast('没有读取到歌单'); return; }
+      const rows = arr.map(p =>
+        '<button class="picker-item" data-pl="' + p.id + '">' +
+          '<div style="width:40px;height:40px;border-radius:10px;overflow:hidden;flex-shrink:0;background:var(--fill-1);">' +
+            (p.coverImgUrl ? '<img src="' + esc(String(p.coverImgUrl).replace(/^http:\/\//, 'https://')) + '" style="width:100%;height:100%;object-fit:cover;">' : '') +
+          '</div>' +
+          '<div style="flex:1;min-width:0;text-align:left;">' +
+            '<div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(p.name) + '</div>' +
+            '<div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">' + (p.trackCount || 0) + ' 首</div>' +
+          '</div>' +
+        '</button>'
+      ).join('');
+      const m = openModal({
+        title: '我的歌单',
+        bodyHTML: '<div class="picker-list" style="max-height:52vh;">' + rows + '</div>',
+        actions: [{ text: '关闭' }],
+        bottom: true
+      });
+      m.mask.querySelectorAll('[data-pl]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const pl = arr.find(x => String(x.id) === btn.dataset.pl);
+          if (!pl) return;
+          btn.disabled = true;
+          try {
+            await this.importPlaylist(pl);
+            m.close();
+            renderMusic();
+          } catch (e) {
+            btn.disabled = false;
+            toast('导入失败：' + (e.message || ''));
+          }
+        });
+      });
+    } catch (e) {
+      toast('获取歌单失败：' + (e.message || ''));
+    }
+  },
+
+  async importPlaylist(pl){
+    toast('正在导入「' + pl.name + '」…');
+    const songs = [];
+    let offset = 0;
+    while (true) {
+      const d = await this.req('playlist_track_all', { id: pl.id, limit: '500', offset: String(offset) });
+      const arr = (d && d.songs) || [];
+      if (!arr.length) break;
+      songs.push.apply(songs, arr);
+      if (arr.length < 500) break;
+      offset += 500;
+      if (offset > 3000) break;
+    }
+    if (!songs.length) throw new Error('歌单为空或没有权限');
+
+    const list = DB.playlist();
+    const exist = new Set();
+    list.forEach(s => { if (s.nid) exist.add(String(s.nid)); exist.add(s.id); });
+    let added = 0, skipped = 0;
+    songs.forEach(s => {
+      const nid = String(s.id);
+      if (!nid || exist.has(nid) || exist.has('ne_' + nid)) { skipped++; return; }
+      exist.add(nid);
+      list.push({
+        id: 'ne_' + nid,
+        nid: nid,
+        name: s.name || '未知歌曲',
+        artist: (s.ar || []).map(a => a.name).join(' / ') || '未知歌手',
+        cover: String((s.al && s.al.picUrl) || '').replace(/^http:\/\//, 'https://'),
+        source: 'netease'
+      });
+      added++;
+    });
+    DB.setPlaylist(list);
+    toast('导入成功：新增 ' + added + ' 首' + (skipped ? '，已存在 ' + skipped + ' 首' : ''));
+  },
+
+  init(){
+    if (this.api() && this.cookie()) {
+      this.refresh().then(() => {
+        if (state.tab === 'music') renderMusic();
+      }).catch(() => {});
+    }
+  }
+};
+
 function renderMusic(){
   const scroll = $('#musicScroll');
   const list = DB.playlist();
@@ -3179,6 +3457,8 @@ function renderMusic(){
   let statusText = '独自收听中';
   if (together && together.status === 'waiting') statusText = '等待对方接受邀请';
   else if (together && together.status === 'active') statusText = '正在和好友一起听';
+  // 一起听时把账号 VIP 状态同步展示
+  if (together && together.status === 'active' && NCM.vipLabel()) statusText += ' · ' + NCM.vipLabel() + ' 已同步';
 
   const coverInner = song && song.cover
     ? '<img src="' + esc(song.cover) + '" alt="">'
@@ -3212,6 +3492,7 @@ function renderMusic(){
 
   scroll.innerHTML =
     togetherBar +
+    NCM.cardHTML() +
     '<div class="card player-card">' +
       '<div class="player-top">' +
         '<div class="cover">' + coverInner + '</div>' +
@@ -3296,6 +3577,7 @@ function renderMusic(){
 
   const btnImport = $('#btnImportNetease'); if (btnImport) btnImport.addEventListener('click', openNeteaseImport);
   const btnUpload = $('#btnUploadAudio'); if (btnUpload) btnUpload.addEventListener('click', openLocalUpload);
+  NCM.bind();
 
   if (together && together.status === 'active'){
     if (state.togetherTimer) clearInterval(state.togetherTimer);
@@ -4995,6 +5277,7 @@ function init(){
 
   // 后台保活：隐藏前托付任务，回到前台收回并回填
   BG.init();
+  NCM.init();
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) BG.handleHidden();
     else BG.handleVisible();
