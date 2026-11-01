@@ -12,7 +12,7 @@
 <script>
 /* 版本自检：GitHub Pages 的 HTML 会缓存 10 分钟，旧页面在这里发现线上版本更新后自动带参数重载 */
 (function(){
-  var BUILD = '20261103e';
+  var BUILD = '20261103f';
   window.CX_BUILD = BUILD;
   try{
     fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
@@ -457,10 +457,12 @@ body.no-anim .sticker-msg{animation:none;}
 .mask.full{align-items:stretch;justify-content:flex-start;padding:0;
   backdrop-filter:none;-webkit-backdrop-filter:none;}
 .mask.full .modal-card{width:100%;max-width:none;height:100%;border-radius:0;transform:none;box-shadow:none;display:flex;flex-direction:column;
-  backdrop-filter:none;-webkit-backdrop-filter:none;}
+  backdrop-filter:none;-webkit-backdrop-filter:none;background:#fff!important;}
+[data-theme="dark"] .mask.full .modal-card{background:#1c1c1e!important;}
 .mask.full .modal-body{flex:1;min-height:0;position:relative;padding:0;overflow:hidden;display:block;}
 .mask.full .modal-body .modal-title{position:absolute;top:calc(12px + env(safe-area-inset-top));left:22px;right:22px;
-  z-index:3;margin:0;padding:0 0 10px;background:var(--card-bg-solid);}
+  z-index:3;margin:0;padding:0 0 10px;background:#fff!important;}
+[data-theme="dark"] .mask.full .modal-body .modal-title{background:#1c1c1e!important;}
 .lib-scroll{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;
   -webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;
   padding:calc(54px + env(safe-area-inset-top)) 22px calc(34px + env(safe-area-inset-bottom));}
@@ -1288,6 +1290,7 @@ function openModal(opts){
   const close = () => {
     if (closed) return;
     closed = true;
+    if (opts.onClose){ try { opts.onClose(); } catch (e) {} }
     mask.classList.remove('show');
     setTimeout(() => mask.remove(), 340);
   };
@@ -5418,17 +5421,22 @@ function openFriendEditor(friend){
 }
 
 function openCardLibrary(){
+  // 自定义 CSS 可能改写弹窗的尺寸/透明/触摸行为，打开字卡库时先临时停用它
+  const cssEl = document.getElementById(CUSTOM_CSS_ID);
+  if (cssEl) cssEl.disabled = true;
   const groups = DB.groups();
   const stickers = DB.stickers();
   const body =
     '<div class="lib-scroll">' +
-    '<div style="display:flex;gap:10px;margin-bottom:14px;">' +
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
       '<button class="btn ghost" id="tabGrpBtn" style="flex:1;">文本库</button>' +
-      '<button class="btn ghost" id="tabStkBtn" style="flex:1;">表情包</button></div>' +
+      '<button class="btn ghost" id="tabStkBtn" style="flex:1;">表情包</button>' +
+      '<span style="font-size:10px;color:var(--text-tertiary);flex:0 0 auto;">v' + esc(window.CX_BUILD || '') + '</span></div>' +
     '<div id="cardLibBody">' + cardLibHTML(groups) + '</div>' +
     '<div id="stickerLibBody" style="display:none;">' + stickerLibHTML(stickers) + '</div>' +
     '</div>';
-  const m = openModal({ title: '内容管理', bodyHTML: body, fullscreen: true });
+  const m = openModal({ title: '内容管理', bodyHTML: body, fullscreen: true,
+    onClose: () => { if (cssEl) cssEl.disabled = false; } });
   const tabGrp = m.mask.querySelector('#tabGrpBtn');
   const tabStk = m.mask.querySelector('#tabStkBtn');
   const bodyGrp = m.mask.querySelector('#cardLibBody');
