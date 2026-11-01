@@ -1,0 +1,12 @@
+{
+  "name": "linyu-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "传讯 · 单文件聊天应用 + 网易云代理（Netlify Function）",
+  "dependencies": {
+    "NeteaseCloudMusicApi": "^4.32.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
