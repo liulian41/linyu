@@ -1146,6 +1146,16 @@ function getAllCards(){
   return out;
 }
 
+function pickWeightedCard(pool){
+  // 文字卡权重最高，表情包次之，避免对方老是发表情
+  const weight = c => (c.type === 'text' ? 8 : c.type === 'sticker' ? 2 : 1);
+  let total = 0;
+  pool.forEach(c => { total += weight(c); });
+  let r = Math.random() * total;
+  for (let i = 0; i < pool.length; i++){ r -= weight(pool[i]); if (r <= 0) return pool[i]; }
+  return pool[pool.length - 1];
+}
+
 function getTextCards(){
   const groups = DB.groups();
   const out = [];
@@ -1231,6 +1241,10 @@ function msgHTML(m, prevTs){
           '<div class="ic-desc">' + title + ' · ' + statusText + '</div>' +
         '</div>';
     }
+    return html;
+  }
+  if (m.type === 'callnote'){
+    html += '<div class="revoke-note">' + esc(m.text || '通话已结束') + '</div>';
     return html;
   }
   if (m.type === 'gift') {
@@ -1548,8 +1562,8 @@ function runAutoReply(friendId){
   try {
     const currentMsgs = DB.chat(f.id);
 
-    // 对方发红包
-    if (Math.random() < 0.25) {
+    // 对方发红包（降低频率，避免总是红包）
+    if (Math.random() < 0.08) {
       const amt = (Math.random() * 20 + 0.01).toFixed(2);
       const blessings = ['恭喜发财', '大吉大利', '天天开心', '谢谢老板'];
       const bless = blessings[Math.floor(Math.random() * blessings.length)];
@@ -1568,7 +1582,7 @@ function runAutoReply(friendId){
     // 对方邀请听歌：已在一起听或已有待处理邀请时，不再重复邀请
     const tg = DB.together();
     const hasPendingInvite = currentMsgs.some(x => x.type === 'invite' && x.inviteStatus === 'pending');
-    if (!hasPendingInvite && !(tg && (tg.status === 'active' || tg.status === 'waiting')) && Math.random() < 0.1) {
+    if (!hasPendingInvite && !(tg && (tg.status === 'active' || tg.status === 'waiting')) && Math.random() < 0.05) {
       appendMessage({
         id: uid(), from: 'other', type: 'invite', inviteStatus: 'pending', ts: Date.now()
       });
@@ -1576,7 +1590,7 @@ function runAutoReply(friendId){
     }
 
     // 对方分享歌曲
-    if (Math.random() < 0.2 && DB.playlist().length > 0) {
+    if (Math.random() < 0.08 && DB.playlist().length > 0) {
       const list = DB.playlist();
       const song = list[Math.floor(Math.random() * list.length)];
       appendMessage({
@@ -1588,7 +1602,7 @@ function runAutoReply(friendId){
     }
     
     // 对方送礼物
-    if (Math.random() < 0.15 && DB.friendWallet() > 50) {
+    if (Math.random() < 0.05 && DB.friendWallet() > 50) {
        const products = DB.products();
        if (products.length) {
          const p = products[Math.floor(Math.random() * products.length)];
@@ -1606,7 +1620,7 @@ function runAutoReply(friendId){
 
     const activePool = getAllCards();
     if (activePool.length) {
-      const pick = activePool[Math.floor(Math.random() * activePool.length)];
+      const pick = pickWeightedCard(activePool);
       appendMessage({
         id: uid(), from: 'other', type: pick.type,
         text: pick.content, ts: Date.now(),
@@ -2973,11 +2987,21 @@ const Call = {
   expand(){ this.minimized = false; this.render(); },
   toggleMute(){ this.muted = !this.muted; this.render(); },
   reset(clearLayer){
+    const wasConnected = this.state === 'connected';
+    const durSec = wasConnected && this.startedAt ? Math.round((Date.now() - this.startedAt) / 1000) : 0;
+    const fid = this.friendId;
     if (this.timerId) { clearInterval(this.timerId); this.timerId = null; }
     if (this.outgoingTimeout) { clearTimeout(this.outgoingTimeout); this.outgoingTimeout = null; }
     this.removeBanner();
     this.state = 'idle'; this.friendId = null; this.startedAt = 0;
     this.minimized = false; this.muted = false;
+    // 通话结束后在聊天框留一行小字：通话时长
+    if (wasConnected && fid && fid === state.currentFriendId) {
+      appendMessage({
+        id: uid(), from: 'system', type: 'callnote',
+        text: '通话时长 ' + fmtDur(durSec), ts: Date.now()
+      });
+    }
     if (clearLayer !== false) this.render();
   },
   removeBanner(){ if (this.bannerEl) { this.bannerEl.remove(); this.bannerEl = null; } },
