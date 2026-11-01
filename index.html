@@ -3284,7 +3284,7 @@ const NCM = {
   openConfig(){
     const body = '<div class="field"><label>代理服务地址</label>' +
       '<input type="text" id="ncmApiInput" placeholder="http://192.168.1.5:3000" value="' + esc(this.api()) + '">' +
-      '<div class="hint">在电脑上运行 netease-server 后填写它的地址，手机和电脑需在同一网络；部署到公网则填公网地址。</div>' +
+      '<div class="hint">在电脑上运行 netease-server 后填写它的地址。若应用是通过 https 打开（如 GitHub Pages），后端也必须是 https（可部署到 Render 或用内网穿透），否则会被浏览器按混合内容拦截。</div>' +
     '</div>';
     openModal({
       title: '网易云后端地址',

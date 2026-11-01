@@ -1,6 +1,7 @@
 // 网易云账号代理服务：只做一层薄封装，把前端需要的接口暴露成 HTTP。
 // 启动：npm install && npm start   默认 http://localhost:3000
 const express = require('express');
+const path = require('path');
 const NCM = require('NeteaseCloudMusicApi');
 
 const PORT = Number(process.env.PORT || 3000);
@@ -30,6 +31,9 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
+
+// 顺手把仓库根目录的静态页面也托管了，方便本机直接用 http://localhost:3000 打开
+app.use(express.static(path.join(__dirname, '..'), { index: 'index.html' }));
 
 app.get('/health', (req, res) => {
   res.json({ ok: true, service: 'cx-netease', time: Date.now() });
