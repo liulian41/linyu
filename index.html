@@ -3505,7 +3505,8 @@ const NCM = {
     if (!this.cookie()) { this.state.profile = null; return null; }
     try {
       const d = await this.req('login_status');
-      this.state.profile = (d && d.profile) || null;
+      if (!d || d.code !== 200 || !d.profile) throw new Error('Cookie 无效或已过期（code ' + (d && d.code) + '）');
+      this.state.profile = d.profile;
     } catch (e) {
       this.state.profile = null;
       throw e;
@@ -3611,9 +3612,17 @@ const NCM = {
       actions: [
         { text: '取消' },
         { text: '登录', primary: true, onClick: async (mask, close) => {
-            const raw = (mask.querySelector('#ncmCookieInput').value || '').trim();
-            const pairs = raw.split(';').map(s => s.trim()).filter(Boolean)
-              .filter(p => /^(MUSIC_U|__csrf|NMTID|os|appver|channel)=/.test(p));
+            let raw = (mask.querySelector('#ncmCookieInput').value || '').trim();
+            raw = raw.replace(/^cookie\s*:\s*/i, '').replace(/\n/g, '; ');
+            let pairs;
+            if (raw.indexOf('=') === -1){
+              // 只粘贴了 MUSIC_U 的值（纯长串），自动补全字段名
+              if (raw.length < 30) { toast('这串内容看起来不是 MUSIC_U'); return false; }
+              pairs = ['MUSIC_U=' + raw];
+            } else {
+              pairs = raw.split(';').map(s => s.trim()).filter(Boolean)
+                .filter(p => /^(MUSIC_U|__csrf|NMTID|os|appver|channel)=/.test(p));
+            }
             if (!pairs.some(p => p.indexOf('MUSIC_U=') === 0)){ toast('Cookie 里没有 MUSIC_U，请复制完整 Cookie'); return false; }
             const btn = mask.querySelector('.modal-actions button.primary');
             if (btn){ btn.textContent = '验证中…'; btn.disabled = true; }
