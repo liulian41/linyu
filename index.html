@@ -892,8 +892,8 @@ const DB = {
     const defaults = {
       anim: true, waitMin: 1, waitMax: 3,
       autoLetter: false, letterUseSticker: true, letterCardsCount: 2,
-      letterInterval: 3,
-      autoMoment: false, momentCardsCount: 2, momentInterval: 5,
+      letterMinH: 1, letterMaxH: 3,
+      autoMoment: false, momentCardsCount: 2, momentMinH: 1, momentMaxH: 3,
       bgKeepAlive: true, silentAudio: false
     };
     const cur = S.get('settings', {});
@@ -1024,6 +1024,7 @@ const state = {
   typingTimer: null,
   typingEl: null,
   replyTimer: null,
+  replyTaskId: null,
   togetherTimer: null,
   quoting: null
 };
@@ -1400,6 +1401,8 @@ function appendMessage(msg){
   while (tmp.firstChild) list.appendChild(tmp.firstChild);
   bindMessageEvents();
   scrollToBottom();
+  // 对方发来任何消息都走系统提醒（回填/自动回复期间由 BG.quiet 抑制）
+  if (msg.from === 'other' && !BG.quiet) BG.notifyMessage(msg);
 }
 
 function pickRandomQuote(msgs){
@@ -1453,12 +1456,37 @@ function sendMessage(isSticker, stickerUrl){
   if (state.replyTimer) clearTimeout(state.replyTimer);
   state.typingTimer = true;
   showTypingIndicator();
+  scheduleReply(f.id, Math.round(wait * 1000));
+}
 
-  state.replyTimer = setTimeout(() => {
-    state.replyTimer = null;
-    state.typingTimer = null;
-    hideTypingIndicator();
+// 回复走 BG 调度：页面可见时用本地定时器，切后台则交给 Service Worker，回来再回填
+function scheduleReply(friendId, delayMs){
+  if (state.replyTaskId) BG.cancel(state.replyTaskId);
+  const id = 'bg_reply_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  state.replyTaskId = id;
+  const fr = DB.friends().find(x => x.id === friendId);
+  BG.schedule({
+    id,
+    fireAt: Date.now() + Math.max(0, delayMs),
+    kind: 'reply',
+    title: fr ? fr.name : '传讯',
+    body: '给你发来一条新消息',
+    tag: 'cx-msg',
+    url: location.href.split('#')[0],
+    payload: { friendId },
+    muteIfVisible: true
+  });
+}
 
+function runAutoReply(friendId){
+  const f = DB.friends().find(x => x.id === friendId) || getCurrentFriend();
+  if (!f) return;
+  state.replyTaskId = null;
+  state.replyTimer = null;
+  state.typingTimer = null;
+  hideTypingIndicator();
+  BG.quiet = true;
+  try {
     const currentMsgs = DB.chat(f.id);
 
     // 对方发红包
@@ -1529,13 +1557,23 @@ function sendMessage(isSticker, stickerUrl){
       // 没有字卡时不发送任何文本
     }
 
-    // 概率来电
+    // 概率来电（同样交给 BG，避免页面冻结后丢失）
     if (Math.random() < 0.05 && Call.state === 'idle') {
-       setTimeout(() => {
-          if (Call.state === 'idle') Call.simulateIncoming();
-       }, 2000 + Math.random() * 3000);
+       const cid = 'bg_call_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+       BG.schedule({
+         id: cid,
+         fireAt: Date.now() + 2000 + Math.random() * 3000,
+         kind: 'call',
+         title: f.name,
+         body: '邀请你进行语音通话',
+         tag: 'cx-call',
+         url: location.href.split('#')[0],
+         payload: { friendId: f.id }
+       });
     }
-  }, Math.round(wait * 1000));
+  } finally {
+    BG.quiet = false;
+  }
 }
 
 function sendRedPacket(amount, blessing) {
@@ -1573,6 +1611,7 @@ function sendRedPacket(amount, blessing) {
   const wait = Math.max(1, lo + Math.random() * (hi - lo));
 
   if (state.replyTimer) clearTimeout(state.replyTimer);
+  if (state.replyTaskId) { BG.cancel(state.replyTaskId); state.replyTaskId = null; }
   state.typingTimer = true;
   showTypingIndicator();
 
@@ -1945,14 +1984,22 @@ function openChatSettings(){
       '<button class="switch ' + (st.autoMoment ? 'on' : '') + '" id="swAutoMoment" style="pointer-events:auto;"></button>' +
     '</div>' +
     
-    '<div class="section-label" style="margin-top:16px;">自动化频率（最短间隔）</div>' +
+    '<div class="section-label" style="margin-top:16px;">自动化频率（小时区间）</div>' +
     '<div class="field" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-bottom:.5px solid var(--sep);padding-bottom:12px;">' +
-      '<span style="font-size:15px;">发信间隔（分钟）</span>' +
-      '<input class="num-input" id="letterInterval" type="number" min="1" max="720" value="' + esc(st.letterInterval || 3) + '">' +
+      '<span style="font-size:15px;">发信间隔（小时）</span>' +
+      '<div style="display:flex;align-items:center;gap:6px;">' +
+        '<input class="num-input" id="letterMinH" type="number" min="1" max="168" value="' + esc(st.letterMinH || 1) + '">' +
+        '<span style="color:var(--text-secondary);">~</span>' +
+        '<input class="num-input" id="letterMaxH" type="number" min="1" max="168" value="' + esc(st.letterMaxH || 3) + '">' +
+      '</div>' +
     '</div>' +
     '<div class="field" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-bottom:.5px solid var(--sep);padding-bottom:12px;">' +
-      '<span style="font-size:15px;">朋友圈间隔（分钟）</span>' +
-      '<input class="num-input" id="momentInterval" type="number" min="1" max="720" value="' + esc(st.momentInterval || 5) + '">' +
+      '<span style="font-size:15px;">朋友圈间隔（小时）</span>' +
+      '<div style="display:flex;align-items:center;gap:6px;">' +
+        '<input class="num-input" id="momentMinH" type="number" min="1" max="168" value="' + esc(st.momentMinH || 1) + '">' +
+        '<span style="color:var(--text-secondary);">~</span>' +
+        '<input class="num-input" id="momentMaxH" type="number" min="1" max="168" value="' + esc(st.momentMaxH || 3) + '">' +
+      '</div>' +
     '</div>' +
 
     '<div class="section-label" style="margin-top:16px;">内容管理</div>' +
@@ -1968,8 +2015,12 @@ function openChatSettings(){
       const cur = DB.settings();
       cur.waitMin = Math.max(0, parseFloat(m.mask.querySelector('#waitMin').value) || 0);
       cur.waitMax = Math.max(0, parseFloat(m.mask.querySelector('#waitMax').value) || 0);
-      cur.letterInterval = Math.max(1, Math.min(720, parseInt(m.mask.querySelector('#letterInterval').value) || 3));
-      cur.momentInterval = Math.max(1, Math.min(720, parseInt(m.mask.querySelector('#momentInterval').value) || 5));
+      const lmin = Math.max(1, Math.min(168, parseInt(m.mask.querySelector('#letterMinH').value) || 1));
+      const lmax = Math.max(lmin, Math.min(168, parseInt(m.mask.querySelector('#letterMaxH').value) || lmin));
+      const mmin = Math.max(1, Math.min(168, parseInt(m.mask.querySelector('#momentMinH').value) || 1));
+      const mmax = Math.max(mmin, Math.min(168, parseInt(m.mask.querySelector('#momentMaxH').value) || mmin));
+      cur.letterMinH = lmin; cur.letterMaxH = lmax;
+      cur.momentMinH = mmin; cur.momentMaxH = mmax;
       DB.setSettings(cur);
       renderMe();
     } }],
@@ -2540,16 +2591,29 @@ function updateLetterBadge() {
     }
 }
 
+// 发信 / 朋友圈的间隔区间（单位：小时）
+function hourRange(prefix, st){
+    const lo = Math.max(1, Math.min(168, Number(st[prefix + 'MinH']) || 1));
+    const hi = Math.max(lo, Math.min(168, Number(st[prefix + 'MaxH']) || lo));
+    return { lo, hi };
+}
+
 function checkAutoLetter(force) {
     const st = DB.settings();
     if (!st.autoLetter) return false;
 
-    const interval = Math.max(1, Number(st.letterInterval) || 3) * 60000;
+    const r = hourRange('letter', st);
+    const minMs = r.lo * 3600000, maxMs = r.hi * 3600000;
     const letters = DB.letters();
     const lastLetter = letters.reduce((a, b) => (a && a.ts > b.ts ? a : b), null);
-    // 频率（最短间隔）优先于随机概率；后台任务回填时也不抢跑
-    if (lastLetter && Date.now() - lastLetter.ts < interval) return false;
-    if (!force && Math.random() > 0.3) return false;
+    const elapsed = lastLetter ? Date.now() - lastLetter.ts : Infinity;
+    // 区间下限之前不生成；到达下限后随时间的推移逐步提高生成概率，上限时必定生成
+    if (elapsed < minMs) return false;
+    if (!force){
+        const span = maxMs - minMs;
+        const p = span > 0 ? Math.min(1, (elapsed - minMs) / span) : 1;
+        if (Math.random() > 0.15 + 0.85 * p) return false;
+    }
 
     const cards = getTextCards();
     if (!cards.length) return false;
@@ -2586,6 +2650,7 @@ function checkAutoLetter(force) {
     DB.setLetters(letters);
     updateLetterBadge();
     if (document.getElementById('letterScreen').classList.contains('show')) renderLetterList();
+    if (!BG.quiet) BG.notifyLetter();
     return true;
 }
 
@@ -2750,12 +2815,18 @@ function checkAutoMoment(force) {
     const st = DB.settings();
     if (!st.autoMoment) return false;
 
-    const interval = Math.max(1, Number(st.momentInterval) || 5) * 60000;
+    const r = hourRange('moment', st);
+    const minMs = r.lo * 3600000, maxMs = r.hi * 3600000;
     const moments = DB.moments();
     const lastMoment = moments[moments.length - 1];
-    // 频率（最短间隔）优先于随机概率；后台任务回填时也不抢跑
-    if (lastMoment && Date.now() - lastMoment.ts < interval) return false;
-    if (!force && Math.random() > 0.3) return false;
+    const elapsed = lastMoment ? Date.now() - lastMoment.ts : Infinity;
+    // 区间下限之前不生成；到达下限后随时间的推移逐步提高生成概率，上限时必定生成
+    if (elapsed < minMs) return false;
+    if (!force){
+        const span = maxMs - minMs;
+        const p = span > 0 ? Math.min(1, (elapsed - minMs) / span) : 1;
+        if (Math.random() > 0.15 + 0.85 * p) return false;
+    }
 
     const cards = getTextCards();
     if (!cards.length) return false;
@@ -2791,6 +2862,7 @@ function checkAutoMoment(force) {
     DB.setMoments(moments);
     renderMoments();
     toast(f.name + ' 发布了新朋友圈');
+    if (!BG.quiet) BG.notifyMoment();
     return true;
 }
 
@@ -2818,6 +2890,7 @@ const Call = {
     this.friendId = f.id;
     this.state = 'incoming';
     this.renderBanner();
+    if (!BG.quiet) BG.notifyEvent('call', f.name, '邀请你进行语音通话', { friendId: f.id }, 'cx-call');
   },
   accept(){ if (this.state !== 'incoming') return; this.removeBanner(); this.connect(); },
   decline(){ this.removeBanner(); this.reset(true); toast('已拒绝来电'); },
@@ -3677,9 +3750,11 @@ function renderMe(){
           '<span class="switch ' + (st.letterUseSticker ? 'on' : '') + '" id="swLetterStk"></span>' +
         '</div></div>' +
       '<div class="row" style="flex-wrap:wrap;gap:10px;">' +
-        '<span class="r-label" style="flex:1 1 100%;font-size:15px;">发信频率（最短间隔·分钟）</span>' +
+        '<span class="r-label" style="flex:1 1 100%;font-size:15px;">发信频率（小时区间）</span>' +
         '<div style="display:flex;align-items:center;gap:8px;width:100%;">' +
-          '<input class="num-input" id="setLetterInterval" type="number" min="1" max="720" value="' + esc(st.letterInterval||3) + '">' +
+          '<input class="num-input" id="setLetterMinH" type="number" min="1" max="168" value="' + esc(st.letterMinH||1) + '">' +
+          '<span style="color:var(--text-secondary);">~</span>' +
+          '<input class="num-input" id="setLetterMaxH" type="number" min="1" max="168" value="' + esc(st.letterMaxH||3) + '">' +
         '</div></div>' +
       '<div class="row" id="rowAutoMoment"><span class="r-label">对方自动发朋友圈</span>' +
         '<span class="switch ' + (st.autoMoment ? 'on' : '') + '"></span></div>' +
@@ -3689,9 +3764,11 @@ function renderMe(){
           '<input class="num-input" id="setMomentCount" type="number" min="1" max="5" value="' + esc(st.momentCardsCount||2) + '">' +
         '</div></div>' +
       '<div class="row" style="flex-wrap:wrap;gap:10px;">' +
-        '<span class="r-label" style="flex:1 1 100%;font-size:15px;">朋友圈频率（最短间隔·分钟）</span>' +
+        '<span class="r-label" style="flex:1 1 100%;font-size:15px;">朋友圈频率（小时区间）</span>' +
         '<div style="display:flex;align-items:center;gap:8px;width:100%;">' +
-          '<input class="num-input" id="setMomentInterval" type="number" min="1" max="720" value="' + esc(st.momentInterval||5) + '">' +
+          '<input class="num-input" id="setMomentMinH" type="number" min="1" max="168" value="' + esc(st.momentMinH||1) + '">' +
+          '<span style="color:var(--text-secondary);">~</span>' +
+          '<input class="num-input" id="setMomentMaxH" type="number" min="1" max="168" value="' + esc(st.momentMaxH||3) + '">' +
         '</div></div>' +
     '</div>' +
     '<div class="group-title">内容</div>' +
@@ -3760,28 +3837,35 @@ function renderMe(){
   });
   $('#rowInstall').addEventListener('click', openInstallGuide);
 
+  const clampH = (v, def) => Math.max(1, Math.min(168, parseInt(v, 10) || def));
   const saveSettings = () => {
     const cur = DB.settings();
     cur.waitMin = Math.max(0, parseFloat($('#setWaitMin').value) || 0);
     cur.waitMax = Math.max(0, parseFloat($('#setWaitMax').value) || 0);
     cur.letterCardsCount = Math.max(1, parseInt($('#setLetterCount').value) || 2);
     cur.momentCardsCount = Math.max(1, parseInt($('#setMomentCount').value) || 2);
-    cur.letterInterval = Math.max(1, Math.min(720, parseInt($('#setLetterInterval').value) || 3));
-    cur.momentInterval = Math.max(1, Math.min(720, parseInt($('#setMomentInterval').value) || 5));
+    const lmin = clampH($('#setLetterMinH').value, 1);
+    const lmax = Math.max(lmin, clampH($('#setLetterMaxH').value, lmin));
+    const mmin = clampH($('#setMomentMinH').value, 1);
+    const mmax = Math.max(mmin, clampH($('#setMomentMaxH').value, mmin));
+    cur.letterMinH = lmin; cur.letterMaxH = lmax;
+    cur.momentMinH = mmin; cur.momentMaxH = mmax;
     DB.setSettings(cur);
     $('#setWaitMin').value = cur.waitMin;
     $('#setWaitMax').value = cur.waitMax;
     $('#setLetterCount').value = cur.letterCardsCount;
     $('#setMomentCount').value = cur.momentCardsCount;
-    $('#setLetterInterval').value = cur.letterInterval;
-    $('#setMomentInterval').value = cur.momentInterval;
+    $('#setLetterMinH').value = cur.letterMinH; $('#setLetterMaxH').value = cur.letterMaxH;
+    $('#setMomentMinH').value = cur.momentMinH; $('#setMomentMaxH').value = cur.momentMaxH;
   };
   $('#setWaitMin').addEventListener('change', saveSettings);
   $('#setWaitMax').addEventListener('change', saveSettings);
   $('#setLetterCount').addEventListener('change', saveSettings);
   $('#setMomentCount').addEventListener('change', saveSettings);
-  $('#setLetterInterval').addEventListener('change', saveSettings);
-  $('#setMomentInterval').addEventListener('change', saveSettings);
+  $('#setLetterMinH').addEventListener('change', saveSettings);
+  $('#setLetterMaxH').addEventListener('change', saveSettings);
+  $('#setMomentMinH').addEventListener('change', saveSettings);
+  $('#setMomentMaxH').addEventListener('change', saveSettings);
 
   $('#rowAnim').addEventListener('click', () => {
     const cur = DB.settings();
@@ -4342,6 +4426,7 @@ const BG = {
   installPrompt: null,
   silentEl: null,
   silentUrl: null,
+  quiet: false,
 
   init(){
     try { this.applied = new Set(S.get('bg_applied', [])); } catch(e){ this.applied = new Set(); }
@@ -4421,7 +4506,7 @@ const BG = {
     const timer = setTimeout(() => {
       this.local.delete(task.id);
       this.applyTask(task);
-      this.showLocalNotification(task);
+      if (!task.muteIfVisible || document.hidden) this.showLocalNotification(task);
     }, Math.max(0, task.fireAt - Date.now()));
     this.local.set(task.id, timer);
   },
@@ -4463,7 +4548,7 @@ const BG = {
     // 尚未到期的任务由主线程接管（页面可见时主线程定时器本来就是准的）
     (r.tasks || []).forEach(task => {
       if (task.fireAt <= Date.now()) this.applyTask(task);
-      else if (task.kind === 'test') this.scheduleLocal(task); // 测试提醒不丢
+      else if (task.kind === 'test' || task.kind === 'reply' || task.kind === 'call') this.scheduleLocal(task);
     });
   },
 
@@ -4476,16 +4561,18 @@ const BG = {
 
     if (kind === 'letter'){
       if (!st.autoLetter) return;
-      const interval = Math.max(1, Number(st.letterInterval) || 3) * 60000;
+      const r = hourRange('letter', st);
+      const gap = (r.lo + Math.random() * (r.hi - r.lo)) * 3600000;
       const last = DB.letters().reduce((m, l) => Math.max(m, l.ts), 0);
-      due = last ? last + interval : now + 15000;
+      due = last ? last + gap : now + 15000;
       title = '传讯 · 新来信';
       body = (friend ? friend.name : 'Ta') + ' 给你写了一封信';
     } else if (kind === 'moment'){
       if (!st.autoMoment) return;
-      const interval = Math.max(1, Number(st.momentInterval) || 5) * 60000;
+      const r = hourRange('moment', st);
+      const gap = (r.lo + Math.random() * (r.hi - r.lo)) * 3600000;
       const last = DB.moments().reduce((m, x) => Math.max(m, x.ts), 0);
-      due = last ? last + interval : now + 15000;
+      due = last ? last + gap : now + 15000;
       title = '传讯 · 朋友圈';
       body = (friend ? friend.name : 'Ta') + ' 发布了新动态';
     }
@@ -4502,7 +4589,8 @@ const BG = {
       title, body,
       tag: 'cx-' + kind,
       url: location.href.split('#')[0],
-      payload: { friendId: friend ? friend.id : null }
+      payload: { friendId: friend ? friend.id : null },
+      muteIfVisible: true
     });
   },
 
@@ -4519,8 +4607,61 @@ const BG = {
 
     const kind = task.kind || (task.payload && task.payload.kind) || '';
     const st = DB.settings();
-    if (kind === 'letter' && st.autoLetter) checkAutoLetter(true);
-    else if (kind === 'moment' && st.autoMoment) checkAutoMoment(true);
+    const prevQuiet = this.quiet;
+    this.quiet = true; // 回填期间不再重复弹提醒
+    try {
+      if (kind === 'letter' && st.autoLetter) checkAutoLetter(true);
+      else if (kind === 'moment' && st.autoMoment) checkAutoMoment(true);
+      else if (kind === 'reply') runAutoReply(task.payload && task.payload.friendId);
+      else if (kind === 'call' && Call.state === 'idle') Call.simulateIncoming();
+    } finally {
+      this.quiet = prevQuiet;
+    }
+  },
+
+  // 统一事件提醒：可见时就地弹，页面隐藏时交给 SW 立即弹
+  notifyEvent(kind, title, body, payload, tag){
+    if (!this.canNotify()) return null;
+    const id = 'bg_evt_' + kind + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+    this.schedule({
+      id,
+      fireAt: Date.now() + 200,
+      kind,
+      title,
+      body,
+      tag: tag || ('cx-' + kind),
+      url: location.href.split('#')[0],
+      payload: payload || null,
+      // 正在聊天页且页面在前台时不弹，其余情况都提醒
+      muteIfVisible: kind !== 'call' && !document.hidden && document.hasFocus() && state.tab === 'chat'
+    });
+    return id;
+  },
+
+  msgPreview(msg){
+    const t = msg && msg.type;
+    if (t === 'text') return String(msg.text || '').slice(0, 60);
+    if (t === 'sticker') return '[表情]';
+    if (t === 'redpacket') return '[红包] ' + (msg.blessing || '');
+    if (t === 'music') return '[音乐] ' + ((msg.musicData && msg.musicData.name) || '');
+    if (t === 'gift') return '[礼物] ' + ((msg.giftData && msg.giftData.name) || '');
+    if (t === 'invite') return '邀请你一起听歌';
+    return '发来一条新消息';
+  },
+
+  notifyMessage(msg){
+    const f = getCurrentFriend();
+    this.notifyEvent('msg', f ? f.name : '传讯', this.msgPreview(msg), { friendId: f ? f.id : null, msgType: msg && msg.type });
+  },
+
+  notifyLetter(){
+    const f = getCurrentFriend();
+    this.notifyEvent('letter', '传讯 · 新来信', (f ? f.name : 'Ta') + ' 给你写了一封信', { friendId: f ? f.id : null });
+  },
+
+  notifyMoment(){
+    const f = getCurrentFriend();
+    this.notifyEvent('moment', '传讯 · 朋友圈', (f ? f.name : 'Ta') + ' 发布了新动态', { friendId: f ? f.id : null });
   },
 
   canNotify(){
@@ -4593,6 +4734,11 @@ const BG = {
     setTimeout(() => {
       if (kind === 'letter'){ switchTab('me'); openLetterbox(); }
       else if (kind === 'moment'){ switchTab('moments'); }
+      else if (kind === 'msg' || kind === 'reply'){ switchTab('chat'); }
+      else if (kind === 'call'){
+        switchTab('chat');
+        if (Call.state === 'idle'){ this.quiet = true; Call.simulateIncoming(); this.quiet = false; }
+      }
     }, 400);
   },
 

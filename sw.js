@@ -1,5 +1,5 @@
 /* sw.js —— 传讯后台保活 / 延时通知 Service Worker */
-const VERSION = 'cx-bg-v2';
+const VERSION = 'cx-bg-v3';
 const HOLD_CAP_MS = 5 * 60 * 1000; // 单个 message 事件最长保活约 5 分钟
 const MAX_FIRED = 30;
 
@@ -148,6 +148,13 @@ async function fireTask(id) {
   clientList.forEach(client => {
     try { client.postMessage({ type: 'TASK_FIRED', task }); } catch (e) {}
   });
+
+  // 页面就在前台时，这类任务不再弹系统通知，避免和界面内的提示重复
+  const focused = clientList.some(c => c && c.focused);
+  if (task.muteIfVisible && focused) {
+    releaseHold(id);
+    return;
+  }
 
   try {
     if (typeof Notification !== 'undefined' && Notification.permission === 'denied') return;
