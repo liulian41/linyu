@@ -3504,8 +3504,11 @@ const NCM = {
   async refresh(){
     if (!this.cookie()) { this.state.profile = null; return null; }
     try {
-      const d = await this.req('login_status');
-      if (!d || d.code !== 200 || !d.profile) throw new Error('Cookie 无效或已过期（code ' + (d && d.code) + '）');
+      const raw = await this.req('login_status');
+      // 后端可能把结果包在 data 里，两种都兼容
+      const d = raw && raw.data && typeof raw.data === 'object' && raw.data.code !== undefined ? raw.data : raw;
+      if (!d || d.code !== 200) throw new Error('登录状态查询失败（code ' + (d && d.code) + (d && d.msg ? ' · ' + d.msg : '') + '）');
+      if (!d.profile) throw new Error('Cookie 已失效或不完整（没取到用户资料）');
       this.state.profile = d.profile;
     } catch (e) {
       this.state.profile = null;

@@ -52,11 +52,10 @@ exports.handler = async (event) => {
 
   try {
     const r = await NCM[fn](params);
+    // 网易云的正常结果也可能带 301/302 status，统一当 200 返回，body 原样透出
     const body = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
-    if (r.status === 301 || r.status === 302) {
-      return reply(200, JSON.stringify({ code: 200, data: r.body }));
-    }
-    return reply(r.status || 200, body);
+    const status = r.status && r.status >= 400 ? r.status : 200;
+    return reply(status, body);
   } catch (e) {
     const msg = (e && e.body && (e.body.msg || e.body.message)) || (e && e.message) || '请求网易云失败';
     return reply(502, { ok: false, error: String(msg), fn });
