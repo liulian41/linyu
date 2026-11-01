@@ -12,7 +12,7 @@
 <script>
 /* 版本自检：GitHub Pages 的 HTML 会缓存 10 分钟，旧页面在这里发现线上版本更新后自动带参数重载 */
 (function(){
-  var BUILD = '20261103c';
+  var BUILD = '20261103d';
   try{
     fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function(r){ return r.json(); })
@@ -457,13 +457,14 @@ body.no-anim .sticker-msg{animation:none;}
   backdrop-filter:none;-webkit-backdrop-filter:none;}
 .mask.full .modal-card{width:100%;max-width:none;height:100%;border-radius:0;transform:none;box-shadow:none;display:flex;flex-direction:column;
   backdrop-filter:none;-webkit-backdrop-filter:none;}
-.mask.full .modal-body{flex:1;min-height:0;padding-top:calc(22px + env(safe-area-inset-top));
-  display:flex;flex-direction:column;overflow:hidden;}
-.mask.full .modal-body .modal-title{flex-shrink:0;}
-.lib-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;
+.mask.full .modal-body{flex:1;min-height:0;position:relative;padding:0;overflow:hidden;display:block;}
+.mask.full .modal-body .modal-title{position:absolute;top:calc(12px + env(safe-area-inset-top));left:22px;right:22px;
+  z-index:3;margin:0;padding:0 0 10px;background:var(--card-bg-solid);}
+.lib-scroll{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;
   -webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;
-  padding-bottom:calc(30px + env(safe-area-inset-bottom));}
+  padding:calc(54px + env(safe-area-inset-top)) 22px calc(34px + env(safe-area-inset-bottom));}
 .lib-scroll img{-webkit-user-drag:none;user-select:none;}
+.stk-tile{contain:layout paint;}
 .mask.full .modal-actions{padding-bottom:env(safe-area-inset-bottom);flex-shrink:0;position:relative;z-index:5;background:var(--card-bg-solid);}
 .mask.full .fs-close{position:absolute;z-index:6;top:calc(env(safe-area-inset-top) + 12px);right:14px;
   width:34px;height:34px;border-radius:50%;background:var(--fill-1);color:var(--text-secondary);
@@ -5713,10 +5714,10 @@ function stickerLibHTML(stickers){
   const grid = stickers.length
     ? '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">' +
         stickers.map((s, i) =>
-          '<div style="position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;background:var(--fill-1);border:.5px solid var(--sep);display:flex;flex-direction:column;align-items:center;justify-content:center;">' +
-            '<img src="' + esc(s.url) + '" style="max-width:100%;max-height:80%;object-fit:contain;" alt="">' +
+          '<div class="stk-tile" style="position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;background:var(--fill-1);border:.5px solid var(--sep);display:flex;flex-direction:column;align-items:center;justify-content:center;">' +
+            '<img src="' + esc(s.url) + '" loading="lazy" decoding="async" style="max-width:100%;max-height:80%;object-fit:contain;" alt="">' +
             '<div style="font-size:10px;color:var(--text-tertiary);margin-top:4px;padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">' + esc(s.name) + '</div>' +
-            '<button class="icon-btn" data-del-sticker="' + i + '" style="position:absolute;top:2px;right:2px;width:24px;height:24px;background:rgba(0,0,0,.5);color:#fff;backdrop-filter:blur(4px);">' + icon('close', 12) + '</button>' +
+            '<button class="icon-btn" data-del-sticker="' + i + '" style="position:absolute;top:2px;right:2px;width:24px;height:24px;background:rgba(0,0,0,.55);color:#fff;">' + icon('close', 12) + '</button>' +
           '</div>'
         ).join('') + '</div>'
     : '<div style="padding:26px 0;text-align:center;font-size:13px;color:var(--text-tertiary);">暂无表情包</div>';
@@ -5739,7 +5740,7 @@ function renderStickerPanel(){
   }
   grid.innerHTML = stickers.map(s =>
     '<div class="sticker-item" data-url="' + esc(s.url) + '">' +
-      '<div class="img-box"><img src="' + esc(s.url) + '" alt="' + esc(s.name) + '"></div>' +
+      '<div class="img-box"><img src="' + esc(s.url) + '" loading="lazy" decoding="async" alt="' + esc(s.name) + '"></div>' +
       '<span>' + esc(s.name) + '</span>' +
     '</div>'
   ).join('');
