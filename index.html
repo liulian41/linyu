@@ -12,7 +12,7 @@
 <script>
 /* 版本自检：GitHub Pages 的 HTML 会缓存 10 分钟，旧页面在这里发现线上版本更新后自动带参数重载 */
 (function(){
-  var BUILD = '20261103f';
+  var BUILD = '20261103g';
   window.CX_BUILD = BUILD;
   try{
     fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
@@ -716,6 +716,15 @@ body.nav-clear .composer{background:transparent !important;}
         <div class="sticker-grid" id="stickerGrid"></div>
       </div>
     </div>
+  </section>
+
+  <section class="page" id="page-cards">
+    <div class="nav">
+      <div class="nav-side"><button class="icon-btn" id="cardsClose" style="width:auto;padding:0 8px;font-size:15px;">关闭</button></div>
+      <div class="nav-title" style="pointer-events:none;"><span class="name">内容管理</span></div>
+      <div class="nav-actions"></div>
+    </div>
+    <div class="scroll-area" id="cardsScroll" style="padding:14px 14px calc(24px + env(safe-area-inset-bottom));"></div>
   </section>
 
   <section class="page" id="page-music">
@@ -5421,36 +5430,52 @@ function openFriendEditor(friend){
 }
 
 function openCardLibrary(){
-  // 自定义 CSS 可能改写弹窗的尺寸/透明/触摸行为，打开字卡库时先临时停用它
+  const page = document.getElementById('page-cards');
+  const host = page && page.querySelector('#cardsScroll');
+  if (!host) return;
+  // 自定义 CSS 可能改写尺寸/透明/触摸行为，打开字卡库时先临时停用它
   const cssEl = document.getElementById(CUSTOM_CSS_ID);
   if (cssEl) cssEl.disabled = true;
+  const tabbar = document.querySelector('.tabbar');
+  const prevTab = state.tab === 'cards' ? 'me' : (state.tab || 'me');
   const groups = DB.groups();
   const stickers = DB.stickers();
   const body =
-    '<div class="lib-scroll">' +
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">' +
       '<button class="btn ghost" id="tabGrpBtn" style="flex:1;">文本库</button>' +
       '<button class="btn ghost" id="tabStkBtn" style="flex:1;">表情包</button>' +
       '<span style="font-size:10px;color:var(--text-tertiary);flex:0 0 auto;">v' + esc(window.CX_BUILD || '') + '</span></div>' +
     '<div id="cardLibBody">' + cardLibHTML(groups) + '</div>' +
-    '<div id="stickerLibBody" style="display:none;">' + stickerLibHTML(stickers) + '</div>' +
-    '</div>';
-  const m = openModal({ title: '内容管理', bodyHTML: body, fullscreen: true,
-    onClose: () => { if (cssEl) cssEl.disabled = false; } });
-  const tabGrp = m.mask.querySelector('#tabGrpBtn');
-  const tabStk = m.mask.querySelector('#tabStkBtn');
-  const bodyGrp = m.mask.querySelector('#cardLibBody');
-  const bodyStk = m.mask.querySelector('#stickerLibBody');
+    '<div id="stickerLibBody" style="display:none;">' + stickerLibHTML(stickers) + '</div>';
+  host.innerHTML = body;
+  host.scrollTop = 0;
+  if (tabbar) tabbar.style.display = 'none';
+  switchTab('cards');
+
+  function closeCards(){
+    if (cssEl) cssEl.disabled = false;
+    if (tabbar) tabbar.style.display = '';
+    host.innerHTML = '';
+    switchTab(prevTab);
+  }
+  const m = { mask: host, close: closeCards };
+  const closeBtn = document.getElementById('cardsClose');
+  if (closeBtn) closeBtn.onclick = closeCards;
+
+  const tabGrp = host.querySelector('#tabGrpBtn');
+  const tabStk = host.querySelector('#tabStkBtn');
+  const bodyGrp = host.querySelector('#cardLibBody');
+  const bodyStk = host.querySelector('#stickerLibBody');
 
   tabGrp.addEventListener('click', () => {
     tabGrp.classList.add('btn'); tabStk.classList.remove('btn');
     bodyGrp.style.display = 'block'; bodyStk.style.display = 'none';
-    m.mask.querySelector('.lib-scroll').scrollTop = 0;
+    host.scrollTop = 0;
   });
   tabStk.addEventListener('click', () => {
     tabStk.classList.add('btn'); tabGrp.classList.remove('btn');
     bodyStk.style.display = 'block'; bodyGrp.style.display = 'none';
-    m.mask.querySelector('.lib-scroll').scrollTop = 0;
+    host.scrollTop = 0;
   });
 
   function refreshGrp(){ bodyGrp.innerHTML = cardLibHTML(DB.groups()); bindGrp(); }
@@ -5534,16 +5559,17 @@ function openCardLibrary(){
   }
 
   function bindCardLibActions(){
-  if (m.mask.dataset.libActionsBound) return;
-  m.mask.dataset.libActionsBound = '1';
-  m.mask.addEventListener('click', (e) => {
+  // 每次打开都重新绑定，避免引用上一次打开的旧节点
+  if (host._libClick) host.removeEventListener('click', host._libClick);
+  host._libClick = (e) => {
     const t = e.target;
     if (!t || !t.closest) return;
     const addBtn = t.closest('#btnAddGroup');
     const bulkBtn = t.closest('#btnBulkAdd');
     if (addBtn) { e.stopPropagation(); openAddGroup(); return; }
     if (bulkBtn) { e.stopPropagation(); openBulkAdd(); }
-  });
+  };
+  host.addEventListener('click', host._libClick);
 
   function openAddGroup(){
     openModal({
@@ -5715,8 +5741,7 @@ function cardLibHTML(groups){
         '<input type="text" data-card-input="' + g.id + '" placeholder="新增一条文本" style="flex:1;padding:9px 12px;border-radius:10px;border:.5px solid var(--sep);background:var(--fill-1);color:var(--text);font-size:13.5px;outline:none;font-family:inherit;">' +
         '<button class="btn" data-add-card="' + g.id + '" style="width:auto;padding:9px 16px;font-size:13px;border-radius:10px;">添加</button>' +
       '</div></div>';
-  }).join('') +
-  '</div>';
+  }).join('');
 }
 
 function stickerLibHTML(stickers){
