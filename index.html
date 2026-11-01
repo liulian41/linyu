@@ -563,6 +563,45 @@ body.no-anim .sticker-msg{animation:none;}
 .order-status.pending{background:rgba(255,149,0,.15);color:#ff9500;}
 .order-status.done{background:rgba(52,199,89,.15);color:#34c759;}
 .order-status.rejected{background:rgba(255,59,48,.15);color:var(--danger);}
+/* ---- 网易云风格播放页 ---- */
+.ncm-hero{position:relative;border-radius:22px;overflow:hidden;margin:0 0 14px;
+  background-color:#1b1b1f;background-size:cover;background-position:center;color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.22);}
+.ncm-hero-bg{position:absolute;inset:-24px;background-size:cover;background-position:center;
+  filter:blur(26px) saturate(1.3) brightness(.72);transform:scale(1.06);}
+.ncm-hero-mask{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.10) 0%,rgba(0,0,0,.46) 55%,rgba(0,0,0,.72) 100%);}
+.ncm-hero-inner{position:relative;z-index:2;padding:16px 16px 14px;display:flex;flex-direction:column;gap:12px;}
+.ncm-eyebrow{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;letter-spacing:.16em;opacity:.62;text-transform:uppercase;}
+.ncm-lyrics{min-height:132px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;text-align:center;padding:2px 4px;}
+.ncm-lyrics .line{font-size:12.5px;line-height:1.5;opacity:.38;transition:opacity .3s var(--ease),font-size .3s var(--ease);}
+.ncm-lyrics .line.cur{font-size:15.5px;opacity:.96;font-weight:600;letter-spacing:.02em;}
+.ncm-lyrics .empty{font-size:12.5px;opacity:.5;}
+.ncm-title-row{display:flex;align-items:flex-start;gap:10px;}
+.ncm-titles{flex:1;min-width:0;}
+.ncm-song{font-size:21px;font-weight:700;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 10px rgba(0,0,0,.4);}
+.ncm-artist{font-size:11.5px;opacity:.7;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ncm-like{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  color:#fff;background:rgba(255,255,255,.14);flex-shrink:0;transition:transform .2s var(--ease),color .2s;}
+.ncm-like:active{transform:scale(.86);}
+.ncm-like.on{color:#ff5d7e;background:rgba(255,93,126,.16);}
+.ncm-seek{width:100%;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;background:rgba(255,255,255,.28);margin:2px 0 0;}
+.ncm-seek::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 0 6px rgba(0,0,0,.3);}
+.ncm-seek::-moz-range-thumb{width:12px;height:12px;border:none;border-radius:50%;background:#fff;}
+.ncm-times{display:flex;justify-content:space-between;font-size:10.5px;opacity:.66;}
+.ncm-controls{display:flex;align-items:center;justify-content:space-around;padding:0 2px;}
+.ncm-ctl{display:flex;flex-direction:column;align-items:center;gap:3px;color:#fff;opacity:.86;font-size:9.5px;letter-spacing:.04em;}
+.ncm-ctl:active{transform:scale(.9);}
+.ncm-ctl.on{color:#ff5d7e;opacity:1;}
+.ncm-ctl.main{width:54px;height:54px;border-radius:50%;justify-content:center;background:rgba(255,255,255,.20);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
+.ncm-vol{display:flex;align-items:center;gap:8px;font-size:10.5px;opacity:.66;}
+.ncm-vol input{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;background:rgba(255,255,255,.28);}
+.ncm-vol input::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:#fff;}
+.ncm-together{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:14px;
+  background:rgba(255,255,255,.13);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
+.ncm-together .tt{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:4px;}
+.ncm-together .ts{font-size:10.5px;opacity:.68;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ncm-avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;background:rgba(255,255,255,.2);flex-shrink:0;}
+.ncm-hero .btn.ghost{background:rgba(255,255,255,.16);color:#fff;border:none;}
 </style>
 </head>
 <body>
@@ -768,7 +807,10 @@ const ICONS = {
   shop:'<path d="M4 4h16v4H4zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M9 21v-8h6v8"/>',
   cart:'<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>',
   wallet:'<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>',
-  wish:'<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>'
+  wish:'<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+  list:'<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+  volume:'<path d="M11 5L6.5 8.6H3v6.8h3.5L11 19z"/><path d="M15.5 9a4 4 0 0 1 0 6"/>',
+  shuffle:'<path d="M17 4l3 3-3 3M17 14l3 3-3 3"/><path d="M4 7h3.5l9.5 10H20M4 17h3.5l3-3.2M14.5 9.2L17 7h3"/>'
 };
 function icon(name, size = 22, extra = ''){
   const p = ICONS[name] || '';
@@ -884,6 +926,8 @@ const DB = {
   setStickers: v => S.set('stickers', v),
   playlist: () => S.get('playlist', []),
   setPlaylist: v => S.set('playlist', v),
+  liked: () => S.get('liked', []),
+  setLiked: v => S.set('liked', v),
   moments: () => S.get('moments', []),
   setMoments: v => S.set('moments', v),
   letters: () => S.get('letters', []),
@@ -3035,6 +3079,10 @@ function makeDraggable(el){
    ============================================================ */
 const Player = {
   audio: null, index: -1, playing: false, objectUrl: null, triedOuter: false,
+  mode: 'normal',           // normal | heart | roam
+  volume: 1, reserved: null, currentNid: null,
+  lyric: { nid: null, lines: [], idx: -1 },
+  lastPartnerAt: 0, partnerBusy: false,
 
   init(){
     if (this.audio) return;
@@ -3099,8 +3147,9 @@ const Player = {
     if (!srcUrl){ this.playing = false; renderMusic(); toast('无法获取播放地址'); return; }
 
     this.audio.src = srcUrl;
-    this.audio.volume = 1;
+    this.audio.volume = this.volume;
     this.audio.load();
+    this.currentNid = song.nid || null;
 
     if (autoplay){
       try{
@@ -3112,6 +3161,7 @@ const Player = {
       }
     }
     renderMusic();
+    this.loadLyric(song);
   },
 
   async play(){
@@ -3138,9 +3188,143 @@ const Player = {
   async next(auto){
     const list = DB.playlist();
     if (!list.length) return;
-    const nextIdx = (this.index + 1) % list.length;
-    await this.load(nextIdx, true);
+    let idx;
+    if (this.reserved != null && this.reserved >= 0 && this.reserved < list.length){
+      idx = this.reserved;
+      this.reserved = null;
+      if (auto) toast('播放 TA 预约的那一首', 1800);
+    } else if (this.mode === 'heart'){
+      const liked = DB.liked().map(String);
+      const cands = list.map((s, i) => ({ s, i })).filter(o => o.s.nid && liked.indexOf(String(o.s.nid)) > -1 && o.i !== this.index);
+      idx = cands.length ? cands[Math.floor(Math.random() * cands.length)].i : this.randomIndex(list);
+    } else if (this.mode === 'roam'){
+      idx = this.randomIndex(list);
+    } else {
+      idx = (this.index + 1) % list.length;
+    }
+    await this.load(idx, true);
     if (!auto) toast('已切到下一首');
+  },
+
+  randomIndex(list){
+    if (list.length <= 1) return 0;
+    let i = this.index;
+    while (i === this.index) i = Math.floor(Math.random() * list.length);
+    return i;
+  },
+
+  setMode(m){
+    this.mode = m;
+    renderMusic();
+    toast(m === 'heart' ? '心动模式：只放你收藏过的歌' : m === 'roam' ? '随机漫游：随便走走' : '顺序播放');
+  },
+
+  async toggleLike(){
+    const list = DB.playlist();
+    const song = list[this.index];
+    if (!song || !song.nid) { toast('这首歌无法收藏'); return; }
+    const nid = String(song.nid);
+    const liked = DB.liked().map(String);
+    const i = liked.indexOf(nid);
+    if (i > -1) liked.splice(i, 1); else liked.push(nid);
+    DB.setLiked(liked);
+    renderMusic();
+    toast(i > -1 ? '已取消收藏' : '已收藏到「我喜欢」');
+    NCM.likeSong(nid, i === -1);
+  },
+
+  setVolume(v){
+    this.volume = clamp(Number(v) || 0, 0, 1);
+    this.init();
+    if (this.audio) this.audio.volume = this.volume;
+  },
+
+  /* ---------- 歌词 ---------- */
+  async loadLyric(song){
+    this.lyric = { nid: song ? String(song.nid || '') : '', lines: [], idx: -1 };
+    if (!song || !song.nid || song.source !== 'netease' || !NCM.api()) { this.paintLyric(true); return; }
+    const nid = String(song.nid);
+    try {
+      const d = await NCM.req('lyric', { id: nid });
+      if (this.currentNid !== song.nid) return;
+      const raw = (d && d.lrc && d.lrc.lyric) || '';
+      this.lyric.lines = parseLrc(raw);
+    } catch (e) {
+      this.lyric.lines = [];
+    }
+    this.paintLyric(true);
+  },
+
+  paintLyric(force){
+    const box = $('#ncmLyric');
+    if (!box) return;
+    const L = this.lyric;
+    if (!L.lines.length){
+      box.innerHTML = '<div class="empty">' + (this.index >= 0 ? '纯音乐，请欣赏' : '选一首歌，和 TA 一起听') + '</div>';
+      return;
+    }
+    const t = this.audio ? (this.audio.currentTime || 0) : 0;
+    let idx = -1;
+    for (let i = 0; i < L.lines.length; i++){ if (L.lines[i].t <= t) idx = i; else break; }
+    if (!force && idx === L.idx) return;
+    L.idx = idx;
+    const from = Math.max(0, idx - 1), to = Math.min(L.lines.length - 1, idx + 1);
+    let html = '';
+    for (let i = from; i <= to; i++){
+      html += '<div class="line' + (i === idx ? ' cur' : '') + '">' + esc(L.lines[i].text || '…') + '</div>';
+    }
+    box.innerHTML = html;
+  },
+
+  /* ---------- 梦角（TA）的主动音乐行为 ---------- */
+  async partnerTick(){
+    const t = DB.together();
+    if (!t || t.status !== 'active') return;
+    if (document.hidden || this.partnerBusy) return;
+    if (Date.now() - (this.lastPartnerAt || 0) < 60000) return;
+    if (Math.random() > 0.45) return;
+    this.lastPartnerAt = Date.now();
+    this.partnerBusy = true;
+    try { await this.partnerAct(); } catch (e) {} finally { this.partnerBusy = false; }
+  },
+
+  async partnerAct(){
+    const list = DB.playlist();
+    if (!list.length) return;
+    const song = list[this.index] || list[0];
+    const roll = Math.random();
+    if (roll < 0.3){
+      await this.next(true);
+      const cur = DB.playlist()[this.index];
+      if (cur) pushPartnerMessage('换了首《' + cur.name + '》，这首想和你一起听。');
+    } else if (roll < 0.5){
+      if (!song || !song.nid) return;
+      const nid = String(song.nid);
+      const liked = DB.liked().map(String);
+      if (liked.indexOf(nid) > -1) return;
+      liked.push(nid);
+      DB.setLiked(liked);
+      renderMusic();
+      pushPartnerMessage('《' + song.name + '》我收藏了，下次还想听。');
+      NCM.likeSong(nid, true);
+    } else if (roll < 0.72){
+      if (list.length < 2) return;
+      const idx = this.randomIndex(list);
+      this.reserved = idx;
+      pushPartnerMessage('下一首听《' + list[idx].name + '》好吗？我先预约了。');
+      toast('TA 预约了下一首', 1800);
+    } else if (roll < 0.88){
+      if (!NCM.api()) return;
+      const s = await NCM.randomStrangerSong();
+      if (!s) return;
+      const liked = DB.liked().map(String);
+      if (liked.indexOf(String(s.nid)) === -1) liked.push(String(s.nid));
+      DB.setLiked(liked);
+      pushPartnerMessage('我在网易云听到《' + s.name + '》，收藏起来了，是首你没听过的歌。');
+    } else {
+      if (this.playing) { this.pause(); pushPartnerMessage('先停一下，我想和你说说话。'); }
+      else { this.play(); pushPartnerMessage('继续听吧。'); }
+    }
   },
 
   async prev(){
@@ -3166,9 +3350,39 @@ function updateSeekUI(){
   const c = Player.audio.currentTime || 0;
   const p = d ? (c / d) * 100 : 0;
   seek.value = p;
-  seek.style.background = 'linear-gradient(to right, var(--text) ' + p + '%, var(--fill-2) ' + p + '%)';
+  seek.style.background = 'linear-gradient(to right, rgba(255,255,255,.95) ' + p + '%, rgba(255,255,255,.28) ' + p + '%)';
   if (cur) cur.textContent = fmtDur(c);
   if (tot) tot.textContent = d ? fmtDur(d) : '--:--';
+  if (Player.lyric && Player.lyric.lines.length) Player.paintLyric();
+}
+
+/* 解析 LRC 歌词 */
+function parseLrc(raw){
+  if (!raw) return [];
+  const lines = [];
+  String(raw).split('\n').forEach(line => {
+    const m = line.match(/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\](.*)/);
+    if (!m) return;
+    const ms = m[3] ? parseInt(m[3].padEnd(3, '0').slice(0, 3), 10) / 1000 : 0;
+    const t = parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + ms;
+    const text = (m[4] || '').trim();
+    if (!text) return;
+    lines.push({ t, text });
+  });
+  return lines.sort((a, b) => a.t - b.t);
+}
+
+/* TA 在音乐页动过之后，往聊天里留一句话 */
+function pushPartnerMessage(text){
+  const t = DB.together();
+  const fid = (t && t.friendId) || state.currentFriendId;
+  if (!fid || !text) return;
+  const msgs = DB.chat(fid);
+  const msg = { id: uid(), from: 'other', type: 'text', text: text, ts: Date.now() };
+  msgs.push(msg);
+  DB.setChat(fid, msgs);
+  if (state.currentFriendId === fid && !document.hidden) renderChat();
+  if (!BG.quiet) BG.notifyMessage(msg);
 }
 
 /* ============================================================
@@ -3445,6 +3659,24 @@ const NCM = {
         if (state.tab === 'music') renderMusic();
       }).catch(() => {});
     }
+  },
+
+  // 收藏同步到网易云账号（失败不影响本地收藏）
+  async likeSong(nid, on){
+    if (!this.loggedIn() || !nid) return;
+    try { await this.req('like', { id: nid, like: on ? 'true' : 'false' }); } catch (e) {}
+  },
+
+  // 从公开榜单里随机挑一首「陌生音乐」，用于 TA 主动收藏
+  async randomStrangerSong(){
+    const charts = ['3778678', '2884035', '19723756'];
+    const id = charts[Math.floor(Math.random() * charts.length)];
+    const songs = await fetchNeteasePlaylist(id);
+    const liked = DB.liked().map(String);
+    const inList = DB.playlist().map(s => String(s.nid || '')).filter(Boolean);
+    const fresh = songs.filter(s => s.nid && !liked.includes(String(s.nid)) && !inList.includes(String(s.nid)));
+    const pool = fresh.length ? fresh : songs;
+    return pool[Math.floor(Math.random() * pool.length)] || null;
   }
 };
 
@@ -3490,30 +3722,51 @@ function renderMusic(){
         '<button class="btn ghost" id="btnEndTogether" style="width:auto;padding:9px 14px;font-size:13px;">结束</button>' +
       '</div>' : '';
 
+  const likedIds = DB.liked().map(String);
+  const isLiked = !!(song && song.nid && likedIds.indexOf(String(song.nid)) > -1);
+  const friends = DB.friends();
+  const pf = (together && together.friendId) ? (friends.find(f => f.id === together.friendId) || getCurrentFriend()) : getCurrentFriend();
+  const modeLabel = Player.mode === 'heart' ? '心动模式' : Player.mode === 'roam' ? '随机漫游' : '顺序播放';
+  const curIdx = Player.index >= 0 ? Player.index : 0;
+  const bgStyle = song && song.cover ? "background-image:url('" + esc(song.cover) + "')" : 'background:#1b1b1f';
+
   scroll.innerHTML =
-    togetherBar +
-    NCM.cardHTML() +
-    '<div class="card player-card">' +
-      '<div class="player-top">' +
-        '<div class="cover">' + coverInner + '</div>' +
-        '<div class="player-meta">' +
-          '<div class="p-name">' + esc(song ? song.name : '暂无歌曲') + '</div>' +
-          '<div class="p-artist">' + esc(song ? (song.artist || '未知歌手') : '请先添加歌曲') + '</div>' +
-          '<div class="p-status">' + esc(statusText) + '</div>' +
+    '<div class="ncm-hero">' +
+      '<div class="ncm-hero-bg" style="' + bgStyle + '"></div>' +
+      '<div class="ncm-hero-mask"></div>' +
+      '<div class="ncm-hero-inner">' +
+        '<div class="ncm-eyebrow"><span>TODAY · TA 今天在听</span><span>' + modeLabel + '</span></div>' +
+        '<div class="ncm-lyrics" id="ncmLyric"></div>' +
+        '<div class="ncm-title-row">' +
+          '<div class="ncm-titles">' +
+            '<div class="ncm-song">' + esc(song ? song.name : '暂无歌曲') + '</div>' +
+            '<div class="ncm-artist">' + esc(song ? (song.artist || '未知歌手') : '导入歌单后开始') + ' · ' + (list.length ? (curIdx + 1) + ' / ' + list.length : '0 / 0') + '</div>' +
+          '</div>' +
+          '<button class="ncm-like' + (isLiked ? ' on' : '') + '" id="btnLike">' + icon('heart', 20) + '</button>' +
+        '</div>' +
+        '<input type="range" class="ncm-seek" id="seekBar" min="0" max="100" step="0.1" value="0">' +
+        '<div class="ncm-times"><span id="seekCur">00:00</span><span id="seekTot">--:--</span></div>' +
+        '<div class="ncm-controls">' +
+          '<button class="ncm-ctl' + (Player.mode !== 'normal' ? ' on' : '') + '" id="btnMode">' + icon(Player.mode === 'normal' ? 'wave' : 'shuffle', 22) + '<span>' + modeLabel + '</span></button>' +
+          '<button class="ncm-ctl" id="btnPrev">' + icon('prev', 24) + '</button>' +
+          '<button class="ncm-ctl main" id="btnPlay">' + icon(Player.playing ? 'pause' : 'play', 26) + '</button>' +
+          '<button class="ncm-ctl" id="btnNext">' + icon('next', 24) + '</button>' +
+          '<button class="ncm-ctl" id="btnList">' + icon('list', 22) + '<span>播放列表</span></button>' +
+        '</div>' +
+        '<div class="ncm-vol">' + icon('volume', 16) + '<input type="range" id="volBar" min="0" max="1" step="0.01" value="' + Player.volume + '"></div>' +
+        '<div class="ncm-together">' +
+          avatarHTML(pf ? pf.avatar : null, pf ? pf.name : 'TA', 30) +
+          '<div style="flex:1;min-width:0;">' +
+            '<div class="tt">' + icon('wave', 14) + '<span>和你一起听</span></div>' +
+            '<div class="ts" id="ncmPartnerText">' + esc(statusText) + '</div>' +
+          '</div>' +
+          (together && together.status === 'active' ? '<button class="btn ghost" id="btnEndTogether" style="width:auto;padding:7px 12px;font-size:12px;">结束</button>' : '') +
         '</div>' +
       '</div>' +
-      '<div class="seek-wrap">' +
-        '<input type="range" class="seek" id="seekBar" min="0" max="100" step="0.1" value="0">' +
-        '<div class="seek-time"><span id="seekCur">00:00</span><span id="seekTot">--:--</span></div>' +
-      '</div>' +
-      '<div class="controls">' +
-        '<button class="ctrl-btn" id="btnPrev">' + icon('prev', 24) + '</button>' +
-        '<button class="ctrl-btn main" id="btnPlay">' + icon(Player.playing ? 'pause' : 'play', 26) + '</button>' +
-        '<button class="ctrl-btn" id="btnNext">' + icon('next', 24) + '</button>' +
-      '</div>' +
     '</div>' +
-    '<div class="card">' +
-      '<div style="font-size:14px;font-weight:600;margin-bottom:12px;">歌单</div>' +
+    NCM.cardHTML() +
+    '<div class="card" id="songCard">' +
+      '<div style="font-size:14px;font-weight:600;margin-bottom:12px;">播放列表' + (together && together.status === 'active' ? ' · TA 也在听' : '') + '</div>' +
       '<div class="song-list">' + songRows + '</div>' +
       '<div style="display:flex;justify-content:center;gap:12px;margin-top:16px;">' +
         '<button class="btn ghost" id="btnImportNetease" style="width:auto;padding:8px 16px;font-size:13px;border-radius:10px;display:flex;align-items:center;gap:6px;">' + icon('link', 16) + ' 导入歌单</button>' +
@@ -3528,16 +3781,34 @@ function renderMusic(){
   const prevBtn = $('#btnPrev'); if (prevBtn) prevBtn.addEventListener('click', () => Player.prev());
   const nextBtn = $('#btnNext'); if (nextBtn) nextBtn.addEventListener('click', () => Player.next(false));
 
+  const likeBtn = $('#btnLike');
+  if (likeBtn) likeBtn.addEventListener('click', () => Player.toggleLike());
+
+  const modeBtn = $('#btnMode');
+  if (modeBtn) modeBtn.addEventListener('click', () => {
+    Player.setMode(Player.mode === 'normal' ? 'heart' : Player.mode === 'heart' ? 'roam' : 'normal');
+  });
+
+  const listBtn = $('#btnList');
+  if (listBtn) listBtn.addEventListener('click', () => {
+    const card = $('#songCard');
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  const volBar = $('#volBar');
+  if (volBar) volBar.addEventListener('input', () => Player.setVolume(volBar.value));
+
   const seekBar = $('#seekBar');
   if (seekBar){
     seekBar.addEventListener('input', () => {
       const p = parseFloat(seekBar.value) || 0;
-      seekBar.style.background = 'linear-gradient(to right, var(--text) ' + p + '%, var(--fill-2) ' + p + '%)';
+      seekBar.style.background = 'linear-gradient(to right, rgba(255,255,255,.95) ' + p + '%, rgba(255,255,255,.28) ' + p + '%)';
     });
     seekBar.addEventListener('change', () => {
       Player.seekTo((parseFloat(seekBar.value) || 0) / 100);
     });
   }
+  Player.paintLyric(true);
 
   $$('#musicScroll [data-idx]').forEach(el => {
     el.addEventListener('click', async e => {
@@ -5274,6 +5545,7 @@ function init(){
   setInterval(checkAutoLetter, 30000);
   setInterval(checkAutoMoment, 30000);
   setInterval(autoSimulateShop, 45000);
+  setInterval(() => Player.partnerTick(), 30000);
 
   // 后台保活：隐藏前托付任务，回到前台收回并回填
   BG.init();

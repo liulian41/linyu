@@ -15,10 +15,12 @@ const ALLOWED = new Set([
   'user_playlist',
   'playlist_detail',
   'playlist_track_all',
-  'vip_info'
+  'vip_info',
+  'lyric',
+  'like'
 ]);
 // 透传参数白名单，其余参数丢弃，防止调用方篡改内部签名参数
-const PARAM_KEYS = ['cookie', 'uid', 'id', 'key', 'qrimg', 'type', 'limit', 'offset', 'timestamp', 'noCookie'];
+const PARAM_KEYS = ['cookie', 'uid', 'id', 'key', 'qrimg', 'type', 'limit', 'offset', 'timestamp', 'noCookie', 'like'];
 
 const app = express();
 app.use(express.json());
