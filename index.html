@@ -3155,7 +3155,15 @@ const Player = {
       }catch(e){}
       if (!srcUrl){ this.playing = false; renderMusic(); toast('本地音频读取失败'); return; }
     } else if (song.source === 'netease' && song.nid){
-      srcUrl = `https://music.163.com/song/media/outer/url?id=${song.nid}.mp3`;
+      // 登录了网易云：先用账号 cookie 取 VIP 音源，失败再退回外链
+      if (NCM.loggedIn()){
+        try {
+          const d = await NCM.req('song_url_v1', { id: song.nid, level: 'exhigh' });
+          const u = d && d.data && d.data[0] && d.data[0].url;
+          if (u) srcUrl = String(u).replace(/^http:\/\//, 'https://');
+        } catch (e) {}
+      }
+      if (!srcUrl) srcUrl = `https://music.163.com/song/media/outer/url?id=${song.nid}.mp3`;
     }
 
     if (!srcUrl){ this.playing = false; renderMusic(); toast('无法获取播放地址'); return; }
@@ -3716,7 +3724,7 @@ const NCM = {
     const charts = ['3778678', '2884035', '19723756'];
     const id = charts[Math.floor(Math.random() * charts.length)];
     const songs = await fetchNeteasePlaylist(id);
-    const liked = DB.liked().map(String);
+    const liked = DB.liked().map(o => String(o.nid));
     const inList = DB.playlist().map(s => String(s.nid || '')).filter(Boolean);
     const fresh = songs.filter(s => s.nid && !liked.includes(String(s.nid)) && !inList.includes(String(s.nid)));
     const pool = fresh.length ? fresh : songs;
@@ -3744,7 +3752,7 @@ function renderMusic(){
     ? list.map((s, i) =>
         '<div class="song-item ' + (i === Player.index ? 'playing' : '') + '" data-idx="' + i + '">' +
           '<div class="s-idx">' + (i + 1) + '</div>' +
-          '<div class="s-cover">' + (s.cover ? '<img src="' + esc(s.cover) + '" alt="">' : icon('music', 18)) + '</div>' +
+          '<div class="s-cover">' + (songCover(s) ? '<img src="' + esc(songCover(s)) + '" alt="">' : icon('music', 18)) + '</div>' +
           '<div class="s-info">' +
             '<div class="s-name">' + esc(s.name) + '</div>' +
             '<div class="s-artist">' + esc(s.artist || '未知歌手') + '</div>' +
@@ -3772,14 +3780,14 @@ function renderMusic(){
   const pf = (together && together.friendId) ? (friends.find(f => f.id === together.friendId) || getCurrentFriend()) : getCurrentFriend();
   const modeLabel = Player.mode === 'heart' ? '心动模式' : Player.mode === 'roam' ? '随机漫游' : Player.mode === 'repeat' ? '单曲循环' : '顺序播放';
   const curIdx = Player.index >= 0 ? Player.index : 0;
-  const bgStyle = song && song.cover ? "background-image:url('" + esc(song.cover) + "')" : 'background:#1b1b1f';
+  const bgStyle = song ? "background-image:url('" + esc(songCover(song) || '') + "')" : 'background:#1b1b1f';
 
   const likedSongs = DB.liked();
   const likedRows = likedSongs.length ? likedSongs.map(o => {
     const inList = list.findIndex(s => s.nid && String(s.nid) === String(o.nid));
     return '<div class="song-item" data-like-nid="' + esc(String(o.nid)) + '">' +
       '<div class="s-idx">' + (inList > -1 && inList === Player.index && Player.playing ? icon('wave', 14) : icon('heart', 14)) + '</div>' +
-      '<div class="s-cover">' + (o.cover ? '<img src="' + esc(o.cover) + '" alt="">' : '') + '</div>' +
+      '<div class="s-cover">' + (songCover(o) ? '<img src="' + esc(songCover(o)) + '" alt="">' : '') + '</div>' +
       '<div class="s-info"><div class="s-name">' + esc(o.name || '未知歌曲') + '</div><div class="s-artist">' + esc(o.artist || '') + '</div></div>' +
     '</div>';
   }).join('') : '<div style="text-align:center;font-size:13px;color:var(--text-tertiary);padding:22px 0;">还没有收藏的歌，点播放页右侧心形收藏</div>';
@@ -3819,6 +3827,7 @@ function renderMusic(){
         '</div>' : '') +
       '</div>' +
     '</div>' +
+    NCM.cardHTML() +
     '<div class="card" id="songCard">' +
       '<div class="ncm-tabs">' +
         '<button class="ncm-tab on" data-tab="list">播放列表 ' + list.length + '</button>' +
@@ -3933,6 +3942,7 @@ function renderMusic(){
 
   const btnImport = $('#btnImportNetease'); if (btnImport) btnImport.addEventListener('click', openNeteaseImport);
   const btnUpload = $('#btnUploadAudio'); if (btnUpload) btnUpload.addEventListener('click', openLocalUpload);
+  NCM.bind();
 
   if (together && together.status === 'active'){
     if (state.togetherTimer) clearInterval(state.togetherTimer);
@@ -3964,6 +3974,16 @@ function fetchWithTimeout(url, ms){
       .then(r => { clearTimeout(timer); resolve(r); })
       .catch(e => { clearTimeout(timer); reject(e); });
   });
+}
+
+/* 封面：优先用导入时保存的 pic，缺失时用 meting 的封面接口（302 到网易云图片） */
+function neteasePic(nid){
+  return 'https://api.injahow.cn/meting/?type=pic&id=' + encodeURIComponent(String(nid));
+}
+function songCover(s){
+  if (!s) return '';
+  if (s.cover) return s.cover;
+  return s.nid ? neteasePic(s.nid) : '';
 }
 
 async function fetchNeteasePlaylist(link){
@@ -5633,6 +5653,7 @@ function init(){
 
   // 后台保活：隐藏前托付任务，回到前台收回并回填
   BG.init();
+  NCM.init();
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) BG.handleHidden();
