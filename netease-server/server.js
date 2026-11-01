@@ -18,6 +18,7 @@ const ALLOWED = new Set([
   'vip_info',
   'song_url_v1',
   'song_url',
+  'song_detail',
   'lyric',
   'like'
 ]);

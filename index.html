@@ -948,6 +948,19 @@ const DB = {
       });
   },
   setLiked: v => S.set('liked', v),
+  friendLiked: () => {
+    const raw = S.get('friend_liked', []);
+    const pl = S.get('playlist', []);
+    return (Array.isArray(raw) ? raw : [])
+      .map(x => typeof x === 'string' ? { nid: x, name: '', artist: '', cover: '' } : (x || {}))
+      .filter(x => x && x.nid)
+      .map(o => {
+        if (o.name) return o;
+        const hit = pl.find(s => s && s.nid && String(s.nid) === String(o.nid));
+        return hit ? { nid: o.nid, name: hit.name || '', artist: hit.artist || '', cover: hit.cover || '' } : o;
+      });
+  },
+  setFriendLiked: v => S.set('friend_liked', v),
   moments: () => S.get('moments', []),
   setMoments: v => S.set('moments', v),
   letters: () => S.get('letters', []),
@@ -1636,8 +1649,8 @@ function appendMessage(msg){
   if (msg.from === 'other' && !BG.quiet) BG.notifyMessage(msg);
 }
 
-function pickRandomQuote(msgs){
-  const quotable = msgs.filter(m => !m.revoked && m.type !== 'invite' && (m.type === 'text' || m.type === 'sticker' || m.type === 'redpacket' || m.type === 'music' || m.type === 'gift'));
+function pickRandomQuote(msgs, onlyFrom){
+  const quotable = msgs.filter(m => !m.revoked && m.type !== 'invite' && (m.type === 'text' || m.type === 'sticker' || m.type === 'redpacket' || m.type === 'music' || m.type === 'gift') && (!onlyFrom || m.from === onlyFrom));
   if (!quotable.length) return null;
   const recent = quotable.slice(-5);
   const q = recent[Math.floor(Math.random() * recent.length)];
@@ -1761,7 +1774,7 @@ function runAutoReply(friendId){
          appendMessage({
            id: uid(), from: 'other', type: 'redpacket',
            amount: amt, blessing: bless, status: 'pending', ts: Date.now(),
-           quote: Math.random() < 0.35 ? pickRandomQuote(currentMsgs) : null
+           quote: Math.random() < 0.35 ? pickRandomQuote(currentMsgs, 'me') : null
          });
          return;
       }
@@ -1784,7 +1797,7 @@ function runAutoReply(friendId){
       appendMessage({
         id: uid(), from: 'other', type: 'music',
         musicData: song, ts: Date.now(),
-        quote: Math.random() < 0.35 ? pickRandomQuote(currentMsgs) : null
+        quote: Math.random() < 0.35 ? pickRandomQuote(currentMsgs, 'me') : null
       });
       return;
     }
@@ -1804,7 +1817,7 @@ function runAutoReply(friendId){
        }
     }
 
-    const replyQuote = Math.random() < 0.4 ? pickRandomQuote(currentMsgs) : null;
+    const replyQuote = Math.random() < 0.4 ? pickRandomQuote(currentMsgs, 'me') : null;
 
     const activePool = getAllCards();
     if (activePool.length) {
@@ -2085,7 +2098,7 @@ async function doShareMusic(song) {
        state.typingTimer = null;
        hideTypingIndicator();
        const cards = getTextCards();
-       const replyQuote = Math.random() < 0.4 ? pickRandomQuote(DB.chat(f.id)) : null;
+       const replyQuote = Math.random() < 0.4 ? pickRandomQuote(DB.chat(f.id), 'me') : null;
        if (cards.length) {
          appendMessage({ id: uid(), from: 'other', type: 'text', text: cards[Math.floor(Math.random()*cards.length)], ts: Date.now(), quote: replyQuote });
        }
@@ -3569,10 +3582,10 @@ const Player = {
     } else if (roll < 0.5){
       if (!song || !song.nid) return;
       const nid = String(song.nid);
-      const liked = DB.liked();
+      const liked = DB.friendLiked();
       if (liked.some(o => String(o.nid) === nid)) return;
       liked.push({ nid: nid, name: song.name || '', artist: song.artist || '', cover: song.cover || '' });
-      DB.setLiked(liked);
+      DB.setFriendLiked(liked);
       renderMusic();
       pushPartnerMessage('《' + song.name + '》我收藏了，下次还想听。');
       NCM.likeSong(nid, true);
@@ -3585,11 +3598,11 @@ const Player = {
     } else if (roll < 0.88){
       const s = await NCM.randomStrangerSong();
       if (!s) return;
-      const liked = DB.liked();
+      const liked = DB.friendLiked();
       if (!liked.some(o => String(o.nid) === String(s.nid))) {
         liked.push({ nid: String(s.nid), name: s.name || '', artist: s.artist || '', cover: s.cover || '' });
       }
-      DB.setLiked(liked);
+      DB.setFriendLiked(liked);
       pushPartnerMessage('我在网易云听到《' + s.name + '》，收藏起来了，是首你没听过的歌。');
     } else {
       if (this.playing) { this.pause(); pushPartnerMessage('先停一下，我想和你说说话。'); }
@@ -4082,6 +4095,16 @@ function renderMusic(){
     '</div>';
   }).join('') : '<div style="text-align:center;font-size:13px;color:var(--text-tertiary);padding:22px 0;">还没有收藏的歌，点播放页右侧心形收藏</div>';
 
+  const friendLikedSongs = DB.friendLiked();
+  const flikeRows = friendLikedSongs.length ? friendLikedSongs.map(o => {
+    const inList = list.findIndex(s => s.nid && String(s.nid) === String(o.nid));
+    return '<div class="song-item" data-like-nid="' + esc(String(o.nid)) + '">' +
+      '<div class="s-idx">' + (inList > -1 && inList === Player.index && Player.playing ? icon('wave', 14) : icon('heart', 14)) + '</div>' +
+      '<div class="s-cover">' + (songCover(o) ? '<img src="' + esc(songCover(o)) + '" alt="" onerror="this.style.display=\'none\'">' : '') + '</div>' +
+      '<div class="s-info"><div class="s-name">' + esc(o.name || '未知歌曲') + '</div><div class="s-artist">' + esc(o.artist || '') + '</div></div>' +
+    '</div>';
+  }).join('') : '<div style="text-align:center;font-size:13px;color:var(--text-tertiary);padding:22px 0;">TA 收藏的歌会出现在这里</div>';
+
   scroll.innerHTML =
     '<div class="ncm-hero">' +
       '<div class="ncm-hero-bg" style="' + bgStyle + '"></div>' +
@@ -4122,9 +4145,11 @@ function renderMusic(){
       '<div class="ncm-tabs">' +
         '<button class="ncm-tab on" data-tab="list">播放列表 ' + list.length + '</button>' +
         '<button class="ncm-tab" data-tab="like">我喜欢 ' + likedSongs.length + '</button>' +
+        '<button class="ncm-tab" data-tab="flike">TA喜欢 ' + friendLikedSongs.length + '</button>' +
       '</div>' +
       '<div id="songListPane"><div class="song-list">' + songRows + '</div></div>' +
       '<div id="songLikePane" style="display:none;"><div class="song-list">' + likedRows + '</div></div>' +
+      '<div id="songFlikePane" style="display:none;"><div class="song-list">' + flikeRows + '</div></div>' +
       '<div style="display:flex;justify-content:center;gap:12px;margin-top:16px;">' +
         '<button class="btn ghost" id="btnImportNetease" style="width:auto;padding:8px 16px;font-size:13px;border-radius:10px;display:flex;align-items:center;gap:6px;">' + icon('link', 16) + ' 导入歌单</button>' +
         '<button class="btn ghost" id="btnUploadAudio" style="width:auto;padding:8px 16px;font-size:13px;border-radius:10px;display:flex;align-items:center;gap:6px;">' + icon('upload', 16) + ' 上传音频</button>' +
@@ -4149,11 +4174,10 @@ function renderMusic(){
 
   $$('#musicScroll .ncm-tab').forEach(btn => {
     btn.addEventListener('click', () => {
-      const isList = btn.dataset.tab === 'list';
+      const tab = btn.dataset.tab;
       $$('#musicScroll .ncm-tab').forEach(b => b.classList.toggle('on', b === btn));
-      const lp = $('#songListPane'), pk = $('#songLikePane');
-      if (lp) lp.style.display = isList ? '' : 'none';
-      if (pk) pk.style.display = isList ? 'none' : '';
+      const panes = { list: $('#songListPane'), like: $('#songLikePane'), flike: $('#songFlikePane') };
+      Object.keys(panes).forEach(k => { if (panes[k]) panes[k].style.display = (k === tab ? '' : 'none'); });
     });
   });
 
@@ -4163,7 +4187,8 @@ function renderMusic(){
       const list2 = DB.playlist();
       let idx = list2.findIndex(s => s.nid && String(s.nid) === String(nid));
       if (idx < 0){
-        const like = DB.liked().find(o => String(o.nid) === String(nid));
+        const like = DB.liked().find(o => String(o.nid) === String(nid)) ||
+          DB.friendLiked().find(o => String(o.nid) === String(nid));
         if (!like) return;
         list2.push({ name: like.name || '未知歌曲', artist: like.artist || '', cover: like.cover || '', nid: like.nid, source: 'netease' });
         DB.setPlaylist(list2);
@@ -4275,9 +4300,44 @@ function metingPic(nid){
 }
 function songCover(s){
   if (!s) return '';
-  if (s.cover && !badCover(s.cover)) return s.cover;
-  // 旧数据没有封面时，按歌曲 id 现取（meting 会 302 到网易云 CDN）
-  return metingPic(s.nid);
+  return (s.cover && !badCover(s.cover)) ? s.cover : '';
+}
+
+/* 旧歌单封面失效：通过后端 song_detail 批量补全真实封面 */
+let _coverHydrating = false;
+async function hydrateCovers(){
+  if (_coverHydrating) return;
+  if (!NCM.api()) return;
+  const list = DB.playlist();
+  const miss = list.filter(s => s && s.nid && (!s.cover || badCover(s.cover)));
+  if (!miss.length) return;
+  _coverHydrating = true;
+  try {
+    for (let i = 0; i < miss.length; i += 100){
+      const chunk = miss.slice(i, i + 100);
+      const ids = JSON.stringify(chunk.map(s => Number(s.nid)).filter(n => n > 0));
+      if (ids === '[]') continue;
+      const d = await NCM.req('song_detail', { ids });
+      const songs = (d && d.songs) || [];
+      const map = new Map();
+      songs.forEach(s => {
+        let pic = (s.al && s.al.picUrl) || (s.album && s.album.picUrl) || '';
+        if (pic && pic.startsWith('http://')) pic = pic.replace('http://', 'https://');
+        if (pic) map.set(String(s.id), pic);
+      });
+      const pl = DB.playlist();
+      let changed = false;
+      pl.forEach(s => {
+        const pic = map.get(String(s.nid));
+        if (pic && (!s.cover || badCover(s.cover)) && !badCover(pic)){ s.cover = pic; changed = true; }
+      });
+      if (changed) DB.setPlaylist(pl);
+    }
+  } catch (e) {
+    console.warn('hydrate covers failed', e);
+  }
+  _coverHydrating = false;
+  renderMusic();
 }
 
 /* 旧歌单可能只存了 id/名字，缺歌手和封面：按需向 meting 补全 */
@@ -4405,6 +4465,7 @@ function openNeteaseImport(){
             toast('导入完成：新增 ' + added + ' 首' +
               (filled ? '，补全封面 ' + filled + ' 首' : '') +
               (skipped ? '，已存在 ' + skipped + ' 首' : ''));
+            setTimeout(hydrateCovers, 500);
           }catch(err){
             if (btn){ btn.textContent = '导入'; btn.disabled = false; }
             toast('解析失败：' + (err.message || '接口异常'));
@@ -6069,6 +6130,8 @@ function init(){
   // 后台保活：隐藏前托付任务，回到前台收回并回填
   BG.init();
   NCM.init();
+  // 配置了后端时，后台静默补全旧歌单缺失的封面
+  setTimeout(hydrateCovers, 1500);
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) BG.handleHidden();

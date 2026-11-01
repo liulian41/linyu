@@ -14,6 +14,7 @@ const ALLOW = {
   playlist_track_all: ['id', 'limit', 'offset'],
   song_url_v1: ['id', 'level'],
   song_url: ['id', 'br'],
+  song_detail: ['ids'],
   lyric: ['id'],
   like: ['id', 'like']
 };
