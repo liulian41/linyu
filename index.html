@@ -9,6 +9,23 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="传讯">
 <title>传讯</title>
+<script>
+/* 版本自检：GitHub Pages 的 HTML 会缓存 10 分钟，旧页面在这里发现线上版本更新后自动带参数重载 */
+(function(){
+  var BUILD = '20261102d';
+  try{
+    fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        if (!v || !v.build || v.build === BUILD) return;
+        var u = new URL(location.href);
+        u.searchParams.set('v', v.build);
+        location.replace(u.toString());
+      })
+      .catch(function(){});
+  }catch(e){}
+})();
+</script>
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;height:100%;}
@@ -1228,6 +1245,11 @@ function openModal(opts){
     card.style.maxWidth = 'none';
     card.style.height = '100%';
     card.style.maxHeight = 'none';
+    card.style.position = 'absolute';
+    card.style.left = '0';
+    card.style.top = '0';
+    card.style.right = '0';
+    card.style.bottom = '0';
     card.style.borderRadius = '0';
     card.style.boxShadow = 'none';
     card.style.transform = 'none';
