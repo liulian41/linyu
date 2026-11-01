@@ -430,7 +430,7 @@ body.no-anim .sticker-msg{animation:none;}
 .mask.bottom .modal-card{max-width:520px;border-radius:var(--radius-l) var(--radius-l) 0 0;
   transform:translateY(100%);padding-bottom:env(safe-area-inset-bottom);}
 .mask.bottom.show .modal-card{transform:none;}
-.modal-body{padding:22px 22px 18px;overflow-y:auto;}
+.modal-body{padding:22px 22px 18px;overflow-y:auto;overflow-x:hidden;}
 .modal-title{font-size:17px;font-weight:600;text-align:center;margin-bottom:8px;}
 .modal-text{font-size:13.5px;line-height:1.6;color:var(--text-secondary);text-align:center;}
 .modal-actions{display:flex;border-top:.5px solid var(--sep);}
@@ -1400,7 +1400,14 @@ function msgHTML(m, prevTs){
     if (m.from === 'other' && m.inviteStatus === 'pending') {
         html += '<div class="invite-card">' +
           '<div class="ic-title">' + icon('wave', 18) + '<span>一起听邀请</span></div>' +
-          '<div class="ic-desc">' + title + ' · <button class="invite-accept-btn" data-accept-invite="' + m.id + '">接受</button></div>' +
+          '<div class="ic-desc">' + title + ' · <button class="invite-accept-btn" data-accept-invite="' + m.id + '">接受</button>' +
+          '<button class="invite-accept-btn" data-reject-invite="' + m.id + '" style="background:var(--fill-2);color:var(--text-secondary);margin-left:8px;">拒绝</button></div>' +
+        '</div>';
+    } else if (m.from === 'me' && m.inviteStatus === 'pending') {
+        html += '<div class="invite-card me">' +
+          '<div class="ic-title">' + icon('wave', 18) + '<span>一起听邀请</span></div>' +
+          '<div class="ic-desc">' + title + ' · ' + statusText +
+          '<button class="invite-accept-btn" data-cancel-invite="' + m.id + '" style="background:var(--fill-2);color:var(--text-secondary);margin-left:8px;">取消邀请</button></div>' +
         '</div>';
     } else {
         html += '<div class="invite-card ' + (m.from === 'me' ? 'me' : '') + '">' +
@@ -1463,9 +1470,15 @@ function msgHTML(m, prevTs){
     const isReceived = m.status === 'received';
     const isMe = m.from === 'me';
     let actionHTML = '';
-    if (isReceived) actionHTML = '<div class="rp-sub" style="color:var(--text-secondary);">已领取</div>';
-    else if (isMe) actionHTML = '<div class="rp-sub" style="color:var(--text-secondary);">等待对方领取</div>';
-    else actionHTML = '<button class="rp-btn" data-claim="' + m.id + '">领取红包</button>';
+    if (isReceived || m.status === 'returned'){
+      actionHTML = '<div class="rp-sub" style="color:var(--text-secondary);">' + (m.status === 'returned' ? '已退回' : '已领取') + '</div>';
+    } else if (isMe){
+      actionHTML = '<div class="rp-sub" style="color:var(--text-secondary);">等待对方领取</div>' +
+        '<button class="rp-btn" data-return-rp="' + m.id + '" style="background:var(--fill-2);color:var(--text-secondary);margin-top:8px;">撤回红包</button>';
+    } else {
+      actionHTML = '<button class="rp-btn" data-claim="' + m.id + '">领取红包</button>' +
+        '<button class="rp-btn" data-return-rp="' + m.id + '" style="background:var(--fill-2);color:var(--text-secondary);margin-top:8px;">退回红包</button>';
+    }
 
     html += '<div class="rp-wrap ' + (isMe ? 'me' : 'other') + '">' +
       '<div class="rp-card ' + (isReceived ? 'received' : '') + '" data-rp-toggle="' + m.id + '">' +
@@ -1578,6 +1591,57 @@ function bindMessageEvents(){
           if (!Player.playing) Player.play();
           toast('已接受邀请，开始一起听');
        }
+    });
+  });
+
+  $$('#chatList [data-reject-invite]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const f = getCurrentFriend(); if (!f) return;
+      const mid = btn.dataset.rejectInvite;
+      const msgs = DB.chat(f.id);
+      const m = msgs.find(x => x.id === mid);
+      if (!m || m.inviteStatus !== 'pending') return;
+      m.inviteStatus = 'rejected';
+      DB.setChat(f.id, msgs);
+      renderChat();
+      toast('已拒绝一起听邀请');
+    });
+  });
+
+  $$('#chatList [data-cancel-invite]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const f = getCurrentFriend(); if (!f) return;
+      const mid = btn.dataset.cancelInvite;
+      const msgs = DB.chat(f.id);
+      const m = msgs.find(x => x.id === mid);
+      if (!m || m.inviteStatus !== 'pending') return;
+      m.inviteStatus = 'ended';
+      DB.setChat(f.id, msgs);
+      const tg = DB.together();
+      if (tg && tg.friendId === f.id && tg.status === 'waiting') DB.setTogether(null);
+      renderChat();
+      toast('已取消邀请');
+    });
+  });
+
+  $$('#chatList [data-return-rp]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const f = getCurrentFriend(); if (!f) return;
+      const mid = btn.dataset.returnRp;
+      const msgs = DB.chat(f.id);
+      const m = msgs.find(x => x.id === mid);
+      if (!m || m.status !== 'pending') return;
+      const amt = parseFloat(m.amount) || 0;
+      m.status = 'returned';
+      DB.setChat(f.id, msgs);
+      if (m.from === 'me') DB.setUserWallet(DB.userWallet() + amt);
+      else DB.setFriendWallet(DB.friendWallet() + amt);
+      renderChat();
+      renderMe && renderMe();
+      toast(m.from === 'me' ? '已撤回红包' : '已退回红包');
     });
   });
 
@@ -5404,8 +5468,8 @@ function openCardLibrary(){
 
 function cardLibHTML(groups){
   const actions = '<div style="display:flex;gap:10px;margin-bottom:14px;">' +
-    '<button class="btn ghost" id="btnAddGroup" style="display:flex;align-items:center;justify-content:center;gap:6px;">' + icon('folder', 16) + '新增分组</button>' +
-    '<button class="btn ghost" id="btnBulkAdd" style="display:flex;align-items:center;justify-content:center;gap:6px;">' + icon('doc', 16) + '批量粘贴</button>' +
+    '<button class="btn ghost" id="btnAddGroup" style="flex:1;min-width:0;width:auto;display:flex;align-items:center;justify-content:center;gap:6px;">' + icon('folder', 16) + '新增分组</button>' +
+    '<button class="btn ghost" id="btnBulkAdd" style="flex:1;min-width:0;width:auto;display:flex;align-items:center;justify-content:center;gap:6px;">' + icon('doc', 16) + '批量粘贴</button>' +
   '</div>';
   if (!groups.length){
     return actions +
