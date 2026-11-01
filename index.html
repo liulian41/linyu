@@ -953,7 +953,8 @@ const DB = {
       letterMinH: 1, letterMaxH: 3,
       autoMoment: false, momentCardsCount: 2, momentMinH: 1, momentMaxH: 3,
       bgKeepAlive: true, silentAudio: false,
-      ncmApi: ''
+      ncmApi: '',
+      chatBg: false, customCss: ''
     };
     const cur = S.get('settings', {});
     return Object.assign({}, defaults, cur && typeof cur === 'object' ? cur : {});
@@ -1014,6 +1015,142 @@ async function delAudio(key){
     tx.objectStore('files').delete(key);
     tx.oncomplete = () => res();
     tx.onerror = () => rej(tx.error);
+  });
+}
+
+/* 自定义 CSS / 聊天背景图 */
+const CUSTOM_CSS_ID = 'cxCustomCss';
+function applyCustomCss(){
+  const css = String(DB.settings().customCss || '');
+  let el = document.getElementById(CUSTOM_CSS_ID);
+  if (!css){ if (el) el.remove(); return; }
+  if (!el){
+    el = document.createElement('style');
+    el.id = CUSTOM_CSS_ID;
+    document.head.appendChild(el);
+  }
+  el.textContent = css;
+}
+
+let _chatBgUrl = null;
+async function applyChatBg(){
+  const list = $('#chatList');
+  if (!list) return;
+  if (_chatBgUrl){ try { URL.revokeObjectURL(_chatBgUrl); } catch (e) {} _chatBgUrl = null; }
+  list.style.backgroundImage = '';
+  list.style.backgroundSize = '';
+  list.style.backgroundPosition = '';
+  if (!DB.settings().chatBg) return;
+  try {
+    const blob = await getAudio('chat_bg');
+    if (!blob) return;
+    _chatBgUrl = URL.createObjectURL(blob);
+    list.style.backgroundImage = 'url("' + _chatBgUrl + '")';
+    list.style.backgroundSize = 'cover';
+    list.style.backgroundPosition = 'center';
+  } catch (e) {}
+}
+
+function saveCustomCss(text){
+  const s = DB.settings();
+  s.customCss = String(text || '').slice(0, 60000);
+  DB.setSettings(s);
+  applyCustomCss();
+  renderMe();
+  toast(s.customCss ? '自定义 CSS 已启用' : '自定义 CSS 已清除');
+}
+
+function openChatBgEditor(){
+  const has = !!DB.settings().chatBg;
+  let blob = null;
+  let remove = false;
+  const m = openModal({
+    title: '聊天背景图',
+    bodyHTML:
+      '<div class="field"><label>预览</label>' +
+        '<div id="bgPreview" style="height:150px;border-radius:12px;border:.5px solid var(--sep);background:var(--fill-1) center/cover no-repeat;"></div></div>' +
+      '<div style="display:flex;gap:8px;margin-top:12px;">' +
+        '<label class="btn ghost" style="flex:1;text-align:center;cursor:pointer;">选择图片' +
+          '<input type="file" id="bgInput" accept="image/*" style="display:none;"></label>' +
+        (has ? '<button class="btn ghost" id="bgRemove" style="flex:1;">移除背景</button>' : '') +
+      '</div>' +
+      '<div class="hint" style="font-size:11.5px;color:var(--text-tertiary);margin-top:10px;">图片只保存在本机浏览器，不会上传。建议长边 1500px 以内。</div>',
+    actions: [
+      { text: '取消' },
+      { text: '保存', primary: true, onClick: async () => {
+          const s = DB.settings();
+          try {
+            if (remove){
+              await delAudio('chat_bg'); s.chatBg = false;
+            } else if (blob){
+              await putAudio('chat_bg', blob); s.chatBg = true;
+            }
+          } catch (e) { toast('保存失败：' + (e && e.message ? e.message : e)); return; }
+          DB.setSettings(s);
+          applyChatBg();
+          renderMe();
+          toast(s.chatBg ? '聊天背景已更新' : (remove ? '已恢复默认背景' : '已取消'));
+      }}
+    ]
+  });
+  const preview = m.mask.querySelector('#bgPreview');
+  if (has){
+    getAudio('chat_bg').then(b => {
+      if (!b) return;
+      const u = URL.createObjectURL(b);
+      preview.style.backgroundImage = 'url("' + u + '")';
+    }).catch(() => {});
+  }
+  m.mask.querySelector('#bgInput').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (f.size > 12 * 1024 * 1024){ toast('图片超过 12MB，请先压缩后再选'); return; }
+    blob = f; remove = false;
+    const u = URL.createObjectURL(f);
+    preview.style.backgroundImage = 'url("' + u + '")';
+    toast('已选择，点「保存」生效');
+  });
+  const rmv = m.mask.querySelector('#bgRemove');
+  if (rmv) rmv.addEventListener('click', () => {
+    remove = true; blob = null;
+    preview.style.backgroundImage = '';
+    toast('已标记移除，点「保存」生效');
+  });
+}
+
+function openCustomCssEditor(){
+  const cur = String(DB.settings().customCss || '');
+  const m = openModal({
+    title: '自定义 CSS',
+    bodyHTML:
+      '<div class="field"><label>CSS 代码</label>' +
+        '<textarea id="cssText" spellcheck="false" style="width:100%;height:180px;border-radius:10px;border:.5px solid var(--sep);background:var(--fill-1);color:var(--text);padding:10px;font:13px/1.5 ui-monospace,Menlo,monospace;resize:vertical;">' + esc(cur) + '</textarea></div>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;">' +
+        '<label class="btn ghost" style="flex:1;text-align:center;cursor:pointer;">导入 .css 文件' +
+          '<input type="file" id="cssFile" accept=".css,text/css,text/plain" style="display:none;"></label>' +
+        '<button class="btn ghost" id="cssClear" style="flex:1;">清空</button>' +
+      '</div>' +
+      '<div class="hint" style="font-size:11.5px;color:var(--text-tertiary);margin-top:10px;">保存后立即生效，只影响本机。例如：.bubble{background:#111 !important;}</div>',
+    actions: [
+      { text: '取消' },
+      { text: '保存', primary: true, onClick: (mask) => {
+          saveCustomCss(mask.querySelector('#cssText').value);
+      }}
+    ]
+  });
+  const ta = m.mask.querySelector('#cssText');
+  m.mask.querySelector('#cssFile').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (f.size > 1 * 1024 * 1024){ toast('CSS 文件超过 1MB'); return; }
+    const fr = new FileReader();
+    fr.onload = () => { ta.value = String(fr.result || ''); toast('已导入，点「保存」生效'); };
+    fr.onerror = () => toast('读取文件失败');
+    fr.readAsText(f);
+  });
+  m.mask.querySelector('#cssClear').addEventListener('click', () => {
+    ta.value = '';
+    saveCustomCss('');
   });
 }
 
@@ -4494,7 +4631,13 @@ function renderMe(){
     '<div class="group"><button class="row" id="rowTheme">' +
       '<span class="r-label">主题模式</span>' +
       '<span class="r-value">' + (isDark ? '深色' : '浅色') + '</span>' +
-      '<span class="switch ' + (isDark ? 'on' : '') + '"></span></button></div>' +
+      '<span class="switch ' + (isDark ? 'on' : '') + '"></span></button>' +
+      '<button class="row" id="rowChatBg"><span class="r-label">聊天背景图</span>' +
+        '<span class="r-value">' + (st.chatBg ? '已设置' : '默认') + '</span>' +
+        '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button>' +
+      '<button class="row" id="rowCustomCss"><span class="r-label">自定义 CSS</span>' +
+        '<span class="r-value">' + (st.customCss ? '已启用' : '未设置') + '</span>' +
+        '<span class="r-chev">' + icon('chevronRight', 18) + '</span></button></div>' +
     '<div class="group-title">聊天与自动化</div>' +
     '<div class="group">' +
       '<div class="row" id="rowAnim"><span class="r-label">消息淡入动画</span>' +
@@ -4575,6 +4718,8 @@ function renderMe(){
   $('#rowProfile').addEventListener('click', openProfileEditor);
   $('#rowFriends').addEventListener('click', openFriendManager);
   $('#rowTheme').addEventListener('click', toggleTheme);
+  $('#rowChatBg').addEventListener('click', openChatBgEditor);
+  $('#rowCustomCss').addEventListener('click', openCustomCssEditor);
   $('#rowCards').addEventListener('click', openCardLibrary);
   $('#rowExport').addEventListener('click', exportData);
   $('#rowImport').addEventListener('click', importData);
@@ -5754,6 +5899,8 @@ function init(){
   renderMe();
   renderShop();
   updateLetterBadge();
+  applyCustomCss();
+  applyChatBg();
 
   setInterval(checkAutoLetter, 30000);
   setInterval(checkAutoMoment, 30000);
