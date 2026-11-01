@@ -12,12 +12,12 @@
 <script>
 /* 版本自检：GitHub Pages 的 HTML 会缓存 10 分钟，旧页面在这里发现线上版本更新后自动带参数重载 */
 (function(){
-  var BUILD = '20261102d';
+  var BUILD = '20261102e';
   try{
     fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(v){
-        if (!v || !v.build || v.build === BUILD) return;
+        if (!v || !v.build || !(v.build > BUILD)) return;
         var u = new URL(location.href);
         u.searchParams.set('v', v.build);
         location.replace(u.toString());
@@ -449,8 +449,11 @@ body.no-anim .sticker-msg{animation:none;}
 .mask.bottom.show .modal-card{transform:none;}
 .mask.full{align-items:stretch;justify-content:flex-start;padding:0;}
 .mask.full .modal-card{width:100%;max-width:none;height:100%;border-radius:0;transform:none;box-shadow:none;display:flex;flex-direction:column;}
-.mask.full .modal-body{flex:1;padding-top:calc(22px + env(safe-area-inset-top));}
-.mask.full .modal-actions{padding-bottom:env(safe-area-inset-bottom);flex-shrink:0;}
+.mask.full .modal-body{flex:1;min-height:0;padding-top:calc(22px + env(safe-area-inset-top));}
+.mask.full .modal-actions{padding-bottom:env(safe-area-inset-bottom);flex-shrink:0;position:relative;z-index:5;background:var(--card-bg-solid);}
+.mask.full .fs-close{position:absolute;z-index:6;top:calc(env(safe-area-inset-top) + 12px);right:14px;
+  width:34px;height:34px;border-radius:50%;background:var(--fill-1);color:var(--text-secondary);
+  display:flex;align-items:center;justify-content:center;}
 .modal-body{padding:22px 22px 18px;overflow-y:auto;overflow-x:hidden;}
 .modal-title{font-size:17px;font-weight:600;text-align:center;margin-bottom:8px;}
 .modal-text{font-size:13.5px;line-height:1.6;color:var(--text-secondary);text-align:center;}
@@ -1240,6 +1243,11 @@ function openModal(opts){
     '</div>';
   root.appendChild(mask);
   if (opts.fullscreen){
+    const xb = document.createElement('button');
+    xb.className = 'fs-close';
+    xb.setAttribute('aria-label', '关闭');
+    xb.innerHTML = icon('close', 20);
+    mask.appendChild(xb);
     const card = mask.querySelector('.modal-card');
     card.style.width = '100%';
     card.style.maxWidth = 'none';
@@ -1274,6 +1282,10 @@ function openModal(opts){
       close();
     });
   });
+  if (opts.fullscreen){
+    const xb = mask.querySelector('.fs-close');
+    if (xb) xb.addEventListener('click', close);
+  }
   return { mask, close, card: mask.querySelector('.modal-card') };
 }
 
