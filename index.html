@@ -430,9 +430,10 @@ body.no-anim .sticker-msg{animation:none;}
 .mask.bottom .modal-card{max-width:520px;border-radius:var(--radius-l) var(--radius-l) 0 0;
   transform:translateY(100%);padding-bottom:env(safe-area-inset-bottom);}
 .mask.bottom.show .modal-card{transform:none;}
-.mask.full{align-items:stretch;justify-content:stretch;padding:0;}
+.mask.full{align-items:stretch;justify-content:flex-start;padding:0;}
 .mask.full .modal-card{width:100%;max-width:none;height:100%;border-radius:0;transform:none;box-shadow:none;display:flex;flex-direction:column;}
 .mask.full .modal-body{flex:1;padding-top:calc(22px + env(safe-area-inset-top));}
+.mask.full .modal-actions{padding-bottom:env(safe-area-inset-bottom);flex-shrink:0;}
 .modal-body{padding:22px 22px 18px;overflow-y:auto;overflow-x:hidden;}
 .modal-title{font-size:17px;font-weight:600;text-align:center;margin-bottom:8px;}
 .modal-text{font-size:13.5px;line-height:1.6;color:var(--text-secondary);text-align:center;}
@@ -1201,6 +1202,11 @@ function openModal(opts){
   const root = $('#modalRoot');
   const mask = document.createElement('div');
   mask.className = 'mask' + (opts.bottom ? ' bottom' : '') + (opts.fullscreen ? ' full' : '');
+  if (opts.fullscreen){
+    mask.style.padding = '0';
+    mask.style.alignItems = 'stretch';
+    mask.style.justifyContent = 'flex-start';
+  }
   const actions = opts.actions || [];
   const actionsHTML = actions.length
     ? '<div class="modal-actions">' + actions.map((a, i) =>
@@ -1216,6 +1222,18 @@ function openModal(opts){
       '</div>' + actionsHTML +
     '</div>';
   root.appendChild(mask);
+  if (opts.fullscreen){
+    const card = mask.querySelector('.modal-card');
+    card.style.width = '100%';
+    card.style.maxWidth = 'none';
+    card.style.height = '100%';
+    card.style.maxHeight = 'none';
+    card.style.borderRadius = '0';
+    card.style.boxShadow = 'none';
+    card.style.transform = 'none';
+    card.style.display = 'flex';
+    card.style.flexDirection = 'column';
+  }
   requestAnimationFrame(() => mask.classList.add('show'));
   let closed = false;
   const close = () => {
@@ -1958,14 +1976,9 @@ function scheduleFriendReturnRp(msgId, friendId){
     if (!m || m.status !== 'pending' || m.from !== 'me') return;
     const amt = parseFloat(m.amount) || 0;
     m.status = 'returned';
-    const texts = ['红包就不收啦，心意我收下啦', '别破费啦，钱你留着', '下次见面你再请我～'];
-    const tm = { id: uid(), from: 'other', type: 'text',
-      text: texts[Math.floor(Math.random() * texts.length)], ts: Date.now() };
-    msgs.push(tm);
     DB.setChat(friendId, msgs);
     DB.setUserWallet(DB.userWallet() + amt);
     if ((getCurrentFriend() || {}).id === friendId) renderChat();
-    else if (!BG.quiet) BG.notifyMessage(tm);
     toast('对方退回了你的红包，¥' + amt.toFixed(2) + ' 已退回余额');
   }, delay);
 }
@@ -5275,7 +5288,7 @@ function openCardLibrary(){
       '<button class="btn ghost" id="tabStkBtn" style="flex:1;">表情包</button></div>' +
     '<div id="cardLibBody">' + cardLibHTML(groups) + '</div>' +
     '<div id="stickerLibBody" style="display:none;">' + stickerLibHTML(stickers) + '</div>';
-  const m = openModal({ title: '内容管理', bodyHTML: body, actions: [{ text: '关闭', primary: true }], bottom: true, fullscreen: true });
+  const m = openModal({ title: '内容管理', bodyHTML: body, actions: [{ text: '关闭', primary: true }], fullscreen: true });
   const tabGrp = m.mask.querySelector('#tabGrpBtn');
   const tabStk = m.mask.querySelector('#tabStkBtn');
   const bodyGrp = m.mask.querySelector('#cardLibBody');
